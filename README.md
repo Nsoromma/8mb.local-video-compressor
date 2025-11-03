@@ -445,7 +445,7 @@ docker compose up -d
 - Consider HTTPS termination and stronger auth for public deployments
 
 ## License
-MIT - See LICENSE file for details
+GNU GPLv3 - See LICENSE file for details
 
 ## Contributing
 Pull requests welcome! Please ensure Docker builds succeed and test with your GPU hardware.
