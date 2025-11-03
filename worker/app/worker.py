@@ -48,6 +48,43 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
     maxrate = int(video_kbps * 1.2)
     bufsize = int(video_kbps * 2)
 
+    # Map requested codec to actual encoder and flags
+    actual_encoder, v_flags, init_hw_flags = map_codec_to_hw(video_codec, hw_info)
+    
+    # Validate encoder is available
+    def is_encoder_available(encoder_name: str) -> bool:
+        """Check if encoder is available in ffmpeg."""
+        try:
+            result = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-encoders"],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            return encoder_name in result.stdout
+        except Exception:
+            return False
+    
+    # Fallback to CPU if hardware encoder not available
+    if actual_encoder not in ("libx264", "libx265", "libaom-av1"):
+        if not is_encoder_available(actual_encoder):
+            _publish(self.request.id, {"type": "log", "message": f"Warning: {actual_encoder} not available, falling back to CPU"})
+            
+            # Determine CPU fallback based on codec type
+            if "h264" in actual_encoder:
+                actual_encoder = "libx264"
+                v_flags = ["-pix_fmt", "yuv420p", "-profile:v", "high"]
+            elif "hevc" in actual_encoder or "h265" in actual_encoder:
+                actual_encoder = "libx265"
+                v_flags = ["-pix_fmt", "yuv420p"]
+            else:  # AV1
+                actual_encoder = "libaom-av1"
+                v_flags = []
+            
+            init_hw_flags = []  # Clear hardware init flags
+    
+    _publish(self.request.id, {"type": "log", "message": f"Using encoder: {actual_encoder} (requested: {video_codec})"})
+
     # Map preset and tune
     preset_val = preset.lower()
     tune_val = (tune or "hq").lower()
@@ -61,11 +98,6 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
     # Audio bitrate string
     a_bitrate_str = f"{int(audio_bitrate_kbps)}k"
 
-    # Map requested codec to available hardware encoder
-    actual_encoder, v_flags, init_hw_flags = map_codec_to_hw(video_codec, hw_info)
-    if actual_encoder != video_codec:
-        _publish(self.request.id, {"type": "log", "message": f"Using encoder: {actual_encoder} (requested: {video_codec})"})
-    
     # Add preset/tune for compatible encoders
     preset_flags = []
     tune_flags = []
