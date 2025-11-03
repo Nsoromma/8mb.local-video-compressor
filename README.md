@@ -19,6 +19,18 @@
 - NVIDIA Container Toolkit installed and configured
 
 ## Quick Start
+### Pull-and-run (Docker Hub images)
+If you just want to run the stack without building images locally:
+
+```bash
+docker compose -f docker-compose.hub.yml up -d
+```
+
+Frontend: http://localhost:5173  •  Backend: http://localhost:8000
+
+Requires NVIDIA GPU runtime for the worker (Compose uses `gpus: all`).
+
+### Build locally
 1. Copy `.env.example` to `.env` and adjust values.
 2. Create folders: `uploads/`, `outputs/` (already present).
 3. Start services:
