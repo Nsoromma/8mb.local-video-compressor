@@ -27,6 +27,11 @@
   let warnText: string | null = null;
   let errorText: string | null = null;
   let isUploading = false;
+  // Support widget state
+  let showSupport = false;
+  function toggleSupport(){ showSupport = !showSupport; }
+  function closeSupport(){ showSupport = false; }
+  const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeSupport(); };
 
   function formatSize(bytes: number): string {
     if (bytes < 1024) return `${bytes} B`;
@@ -250,14 +255,6 @@
 </div>
 
 <!-- Floating support widget -->
-<script lang="ts">
-  let showSupport = false;
-  function toggleSupport(){ showSupport = !showSupport; }
-  function closeSupport(){ showSupport = false; }
-  // Optional: Close on Escape
-  const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeSupport(); };
-</script>
-
 <button
   class="fixed bottom-4 right-4 bg-gray-800/90 hover:bg-gray-700 text-xs px-3 py-1.5 rounded-full shadow-lg border border-gray-700 backdrop-blur-sm flex items-center gap-1 z-50"
   on:click={toggleSupport}
