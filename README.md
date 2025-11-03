@@ -162,7 +162,7 @@ docker run -d --name 8mblocal -p 8000:8000 -v ./uploads:/app/uploads -v ./output
 
 #### NVIDIA GPU (NVENC)
 ```bash
-docker run -d --name 8mblocal --gpus all -p 8000:8000 -v ./uploads:/app/uploads -v ./outputs:/app/outputs jms1717/8mblocal:latest
+docker run -d --name 8mblocal --gpus all --cap-add=SYS_ADMIN --cap-add=VIDEO -p 8000:8000 -v ./uploads:/app/uploads -v ./outputs:/app/outputs jms1717/8mblocal:latest
 ```
 
 #### Intel/AMD GPU (VAAPI - Linux)
@@ -172,7 +172,7 @@ docker run -d --name 8mblocal --device=/dev/dri:/dev/dri -p 8000:8000 -v ./uploa
 
 #### NVIDIA + VAAPI (Dual GPU - Linux)
 ```bash
-docker run -d --name 8mblocal --gpus all --device=/dev/dri:/dev/dri -p 8000:8000 -v ./uploads:/app/uploads -v ./outputs:/app/outputs jms1717/8mblocal:latest
+docker run -d --name 8mblocal --gpus all --cap-add=SYS_ADMIN --cap-add=VIDEO --device=/dev/dri:/dev/dri -p 8000:8000 -v ./uploads:/app/uploads -v ./outputs:/app/outputs jms1717/8mblocal:latest
 ```
 
 Access the web UI at: **http://localhost:8000**
@@ -213,6 +213,9 @@ services:
       - ./outputs:/app/outputs
       - ./.env:/app/.env  # Optional: for custom settings
     restart: unless-stopped
+    cap_add:
+      - SYS_ADMIN  # Required for NVENC access
+      - VIDEO
     deploy:
       resources:
         reservations:
@@ -383,14 +386,29 @@ docker compose up -d
 ### Troubleshooting
 
 #### Hardware Acceleration Issues
-- **NVENC not available or "Operation not permitted" error**: 
+- **NVENC "Operation not permitted" error**: 
+  - This means the GPU is detected but NVENC encoder can't be accessed
+  - **Solution**: Add capabilities to your docker run command:
+    ```bash
+    docker run -d --name 8mblocal \
+      --gpus all \
+      --cap-add=SYS_ADMIN \
+      --cap-add=VIDEO \
+      -p 8000:8000 \
+      -v ./uploads:/app/uploads \
+      -v ./outputs:/app/outputs \
+      jms1717/8mblocal:latest
+    ```
+  - Or in Docker Compose, add:
+    ```yaml
+    cap_add:
+      - SYS_ADMIN
+      - VIDEO
+    ```
   - Confirm NVIDIA drivers installed on host: `nvidia-smi`
   - Check driver version in container: `docker exec 8mblocal nvidia-smi`
-  - Verify CUDA libraries accessible: `docker exec 8mblocal bash -c "ls -l /usr/lib/x86_64-linux-gnu/libnvidia-encode.so*"`
   - On Linux: Install [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
-  - Verify `--gpus all` flag is used in docker run command
-  - Check logs: `docker logs 8mblocal | grep -i nvidia`
-  - **If NVENC keeps failing**: Disable NVENC codecs in Settings → Available Codecs and use CPU or VAAPI instead
+  - **If still failing**: System will automatically fallback to CPU encoding
   
 - **Intel QSV not working**: 
   - Ensure `/dev/dri` exists: `ls -l /dev/dri`
