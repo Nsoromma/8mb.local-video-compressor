@@ -11,7 +11,15 @@ from fastapi.staticfiles import StaticFiles
 from redis.asyncio import Redis
 
 from .config import get_settings
-from .jobs import JobMetadata, channel_name, get_job, job_key, publish, store_job
+from .jobs import (
+    JOB_KEY_PREFIX,
+    JobMetadata,
+    channel_name,
+    get_job,
+    job_key,
+    publish,
+    store_job,
+)
 from .schemas import JobCreateResponse, JobRequest, JobStatusResponse
 from .security import basic_auth, enforce_websocket_auth
 from .tasks import compress_video
@@ -19,7 +27,7 @@ from .cleanup import setup_cleanup_scheduler
 from .utils import estimate_bitrates, run_ffprobe
 
 settings = get_settings()
-app = FastAPI(title="SmartDrop API")
+app = FastAPI(title="8mb.local API")
 
 cleanup_scheduler = None
 
@@ -188,7 +196,7 @@ async def job_updates(websocket: WebSocket, job_id: str):
 @app.get("/api/jobs/{job_id}/log")
 async def job_log(job_id: str, limit: int = 200, _credentials=Depends(basic_auth)):
     redis = await redis_client()
-    key = f"smartdrop:jobs:{job_id}:log"
+    key = f"{JOB_KEY_PREFIX}:{job_id}:log"
     entries = await redis.lrange(key, -limit, -1)
     await redis.aclose()
     return {"log": entries}

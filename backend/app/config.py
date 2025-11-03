@@ -25,11 +25,11 @@ class Settings(BaseSettings):
         description="Override for Celery result backend. Defaults to redis_url when unset.",
     )
     uploads_dir: Path = Field(
-        default=Path(os.getenv("SMARTDROP_UPLOADS_DIR", "/app/uploads")),
+        default=Path(os.getenv("EIGHTMBLOCAL_UPLOADS_DIR", "/app/uploads")),
         description="Directory where uploaded source files are stored.",
     )
     outputs_dir: Path = Field(
-        default=Path(os.getenv("SMARTDROP_OUTPUTS_DIR", "/app/outputs")),
+        default=Path(os.getenv("EIGHTMBLOCAL_OUTPUTS_DIR", "/app/outputs")),
         description="Directory where transcoded files are written.",
     )
     cleanup_interval_seconds: int = Field(
@@ -50,8 +50,8 @@ class Settings(BaseSettings):
     )
 
     class Config:
-        env_prefix = "SMARTDROP_"
-        env_file = os.getenv("SMARTDROP_ENV_FILE")
+        env_prefix = "EIGHTMBLOCAL_"
+        env_file = os.getenv("EIGHTMBLOCAL_ENV_FILE")
         case_sensitive = False
 
     @property

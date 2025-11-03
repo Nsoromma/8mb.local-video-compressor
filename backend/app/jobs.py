@@ -7,8 +7,8 @@ from typing import Any, Dict, Optional
 
 from redis.asyncio import Redis
 
-JOB_KEY_PREFIX = "smartdrop:jobs"
-JOB_CHANNEL_PREFIX = "smartdrop:channel"
+JOB_KEY_PREFIX = "8mblocal:jobs"
+JOB_CHANNEL_PREFIX = "8mblocal:channel"
 
 
 @dataclass

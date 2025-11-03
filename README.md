@@ -1,6 +1,6 @@
-# SmartDrop
+# 8mb.local
 
-SmartDrop is a self-hosted, GPU-accelerated alternative to 8mb.video. Drop a video, choose the destination size, and let NVIDIA NVENC shrink the file with modern codecs such as AV1, HEVC, or H.264. The stack is designed for fire-and-forget operation with real-time status updates.
+8mb.local is a self-hosted, GPU-accelerated alternative to 8mb.video. Drop a video, choose the destination size, and let NVIDIA NVENC shrink the file with modern codecs such as AV1, HEVC, or H.264. The stack is designed for fire-and-forget operation with real-time status updates.
 
 ## Features
 
@@ -22,8 +22,8 @@ SmartDrop is a self-hosted, GPU-accelerated alternative to 8mb.video. Drop a vid
 Basic authentication can be enabled by exporting credentials before running Compose:
 
 ```bash
-export SMARTDROP_BASIC_AUTH_USERNAME=admin
-export SMARTDROP_BASIC_AUTH_PASSWORD=changeme
+export EIGHTMBLOCAL_BASIC_AUTH_USERNAME=admin
+export EIGHTMBLOCAL_BASIC_AUTH_PASSWORD=changeme
 ```
 
 Use the **Access** panel on the homepage to store credentials in the browser so API calls include the proper Authorization header.
@@ -50,7 +50,7 @@ Uploads are stored under `./uploads` and results under `./outputs`. Both directo
 - FFmpeg is compiled in the worker image with `--enable-nonfree`, `--enable-libnpp`, `--enable-nvenc`, `--enable-cuda-nvcc`, and `--enable-libopus` to unlock NVENC encoders.
 - The backend exposes `/ws/jobs/<id>` for live updates and `/outputs/*` for static downloads.
 - Advanced codec presets map directly to NVENC speed-quality settings (`p1`, `p5`, `p7`).
-- Adjust cleanup cadence via `SMARTDROP_CLEANUP_INTERVAL_SECONDS` and retention with `SMARTDROP_FILE_TTL_SECONDS`.
+- Adjust cleanup cadence via `EIGHTMBLOCAL_CLEANUP_INTERVAL_SECONDS` and retention with `EIGHTMBLOCAL_FILE_TTL_SECONDS`.
 
 ## Roadmap
 

@@ -16,13 +16,13 @@ services:
     build:
       context: ./backend
     environment:
-      - SMARTDROP_REDIS_URL=redis://redis-broker:6379/0
-      - SMARTDROP_UPLOADS_DIR=/app/uploads
-      - SMARTDROP_OUTPUTS_DIR=/app/outputs
-      - SMARTDROP_BASIC_AUTH_USERNAME=${SMARTDROP_BASIC_AUTH_USERNAME:-}
-      - SMARTDROP_BASIC_AUTH_PASSWORD=${SMARTDROP_BASIC_AUTH_PASSWORD:-}
-      - SMARTDROP_CLEANUP_INTERVAL_SECONDS=600
-      - SMARTDROP_FILE_TTL_SECONDS=3600
+      - EIGHTMBLOCAL_REDIS_URL=redis://redis-broker:6379/0
+      - EIGHTMBLOCAL_UPLOADS_DIR=/app/uploads
+      - EIGHTMBLOCAL_OUTPUTS_DIR=/app/outputs
+      - EIGHTMBLOCAL_BASIC_AUTH_USERNAME=${EIGHTMBLOCAL_BASIC_AUTH_USERNAME:-}
+      - EIGHTMBLOCAL_BASIC_AUTH_PASSWORD=${EIGHTMBLOCAL_BASIC_AUTH_PASSWORD:-}
+      - EIGHTMBLOCAL_CLEANUP_INTERVAL_SECONDS=600
+      - EIGHTMBLOCAL_FILE_TTL_SECONDS=3600
     volumes:
       - ./uploads:/app/uploads
       - ./outputs:/app/outputs
@@ -34,8 +34,7 @@ services:
 
   worker:
     build:
-      context: .
-      dockerfile: worker/Dockerfile
+      context: ./worker
     deploy:
       resources:
         reservations:
@@ -44,9 +43,9 @@ services:
               capabilities: [gpu]
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
-      - SMARTDROP_REDIS_URL=redis://redis-broker:6379/0
-      - SMARTDROP_UPLOADS_DIR=/app/uploads
-      - SMARTDROP_OUTPUTS_DIR=/app/outputs
+      - EIGHTMBLOCAL_REDIS_URL=redis://redis-broker:6379/0
+      - EIGHTMBLOCAL_UPLOADS_DIR=/app/uploads
+      - EIGHTMBLOCAL_OUTPUTS_DIR=/app/outputs
     volumes:
       - ./uploads:/app/uploads
       - ./outputs:/app/outputs

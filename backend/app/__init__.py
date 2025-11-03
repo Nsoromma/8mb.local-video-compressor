@@ -1,1 +1,1 @@
-"""SmartDrop backend application package."""
+"""8mb.local backend application package."""

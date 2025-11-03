@@ -9,7 +9,7 @@ from .config import get_settings
 settings = get_settings()
 
 celery = Celery(
-    "smartdrop",
+    "8mblocal",
     broker=settings.broker_url,
     backend=settings.result_backend,
 )
@@ -24,6 +24,6 @@ celery.conf.update(
 )
 
 
-@celery.task(name="smartdrop.healthcheck")
+@celery.task(name="8mblocal.healthcheck")
 def healthcheck() -> str:
     return os.getenv("HOSTNAME", "worker")

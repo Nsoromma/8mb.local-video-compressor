@@ -84,8 +84,8 @@ export default function HomePage() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const storedUser = window.localStorage.getItem("smartdrop-basic-username");
-    const storedPass = window.localStorage.getItem("smartdrop-basic-password");
+    const storedUser = window.localStorage.getItem("eightmblocal-basic-username");
+    const storedPass = window.localStorage.getItem("eightmblocal-basic-password");
     if (storedUser) setAuthUsername(storedUser);
     if (storedPass) setAuthPassword(storedPass);
   }, []);
@@ -133,20 +133,20 @@ export default function HomePage() {
   const handleSaveCredentials = useCallback(() => {
     if (typeof window === "undefined") return;
     if (!authUsername || !authPassword) {
-      window.localStorage.removeItem("smartdrop-basic-username");
-      window.localStorage.removeItem("smartdrop-basic-password");
+      window.localStorage.removeItem("eightmblocal-basic-username");
+      window.localStorage.removeItem("eightmblocal-basic-password");
       return;
     }
-    window.localStorage.setItem("smartdrop-basic-username", authUsername);
-    window.localStorage.setItem("smartdrop-basic-password", authPassword);
+    window.localStorage.setItem("eightmblocal-basic-username", authUsername);
+    window.localStorage.setItem("eightmblocal-basic-password", authPassword);
   }, [authUsername, authPassword]);
 
   const handleClearCredentials = useCallback(() => {
     setAuthUsername("");
     setAuthPassword("");
     if (typeof window !== "undefined") {
-      window.localStorage.removeItem("smartdrop-basic-username");
-      window.localStorage.removeItem("smartdrop-basic-password");
+      window.localStorage.removeItem("eightmblocal-basic-username");
+      window.localStorage.removeItem("eightmblocal-basic-password");
     }
   }, []);
 
@@ -242,7 +242,7 @@ export default function HomePage() {
     <main className="min-h-screen flex items-center justify-center px-4 py-10">
       <div className="max-w-4xl w-full space-y-8">
         <header className="text-center space-y-2">
-          <h1 className="text-4xl font-bold tracking-tight">SmartDrop</h1>
+          <h1 className="text-4xl font-bold tracking-tight">8mb.local</h1>
           <p className="text-slate-400">Fire-and-forget GPU-accelerated video compression.</p>
         </header>
 

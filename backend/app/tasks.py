@@ -116,7 +116,7 @@ def build_ffmpeg_command(
     ]
 
 
-@celery.task(name="smartdrop.compress_video")
+@celery.task(name="8mblocal.compress_video")
 def compress_video(job_id: str, payload: Dict[str, any]) -> Dict[str, any]:
     input_file = Path(payload["input_path"])
     output_file = Path(payload["output_path"])
