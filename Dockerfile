@@ -15,20 +15,13 @@ WORKDIR /build
 RUN git clone https://git.videolan.org/git/ffmpeg/nv-codec-headers.git && \
     cd nv-codec-headers && make install && cd ..
 
-# Intel Media SDK for QSV (optional, using built-in QSV support)
-RUN git clone https://github.com/Intel-Media-SDK/MediaSDK.git && \
-    cd MediaSDK && \
-    mkdir build && cd build && \
-    cmake .. && make -j$(nproc) && make install && \
-    ldconfig && cd ../..
-
 # Build FFmpeg with all hardware acceleration support
 RUN wget https://ffmpeg.org/releases/ffmpeg-7.0.tar.xz && \
     tar xf ffmpeg-7.0.tar.xz && cd ffmpeg-7.0 && \
     ./configure \
       --enable-nonfree --enable-gpl \
       --enable-cuda-nvcc --enable-libnpp --enable-nvenc \
-      --enable-libmfx --enable-vaapi \
+      --enable-vaapi \
       --enable-libx264 --enable-libx265 --enable-libvpx --enable-libopus \
       --extra-cflags=-I/usr/local/cuda/include \
       --extra-ldflags=-L/usr/local/cuda/lib64 && \
@@ -55,7 +48,7 @@ ENV PYTHONUNBUFFERED=1
 RUN apt-get update && apt-get install -y \
     python3.10 python3-pip supervisor redis-server \
     libopus0 libx264-163 libx265-199 libvpx7 libnuma1 \
-    libva2 libva-drm2 libmfx1 \
+    libva2 libva-drm2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy FFmpeg from build stage
