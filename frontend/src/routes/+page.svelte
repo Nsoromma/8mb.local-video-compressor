@@ -1,12 +1,12 @@
 <script lang="ts">
   import '../app.css';
   import { onMount } from 'svelte';
-  import { uploadWithProgress, startCompress, openProgressStream, downloadUrl } from '$lib/api';
+  import { uploadWithProgress, startCompress, openProgressStream, downloadUrl, getAvailableCodecs } from '$lib/api';
 
   let file: File | null = null;
   let uploadedFileName: string | null = null; // Track what file was uploaded
   let targetMB = 25;
-  let videoCodec: 'av1_nvenc' | 'hevc_nvenc' | 'h264_nvenc' | 'libx264' | 'libx265' | 'libaom-av1' | 'libsvtav1' = 'av1_nvenc';
+  let videoCodec: string = 'av1_nvenc';
   let audioCodec: 'libopus' | 'aac' = 'libopus';
   let preset: 'p1'|'p2'|'p3'|'p4'|'p5'|'p6'|'p7' = 'p6';
   let audioKbps: 64|96|128|160|192|256 = 128;
@@ -41,7 +41,11 @@
   function closeSupport(){ showSupport = false; }
   const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeSupport(); };
 
-  // Load default presets on mount
+  // Available codecs from backend
+  let availableCodecs: Array<{value: string, label: string, group: string}> = [];
+  let hardwareType = 'cpu';
+
+  // Load default presets and available codecs on mount
   onMount(async () => {
     try {
       const res = await fetch('/api/settings/presets');
@@ -58,7 +62,85 @@
     } catch (err) {
       console.warn('Failed to load default presets, using hardcoded defaults');
     }
+
+    // Load available codecs
+    try {
+      const codecData = await getAvailableCodecs();
+      hardwareType = codecData.hardware_type;
+      availableCodecs = buildCodecList(codecData);
+    } catch (err) {
+      console.warn('Failed to load available codecs, using fallback');
+      availableCodecs = [
+        { value: 'libx264', label: 'H.264 (CPU)', group: 'cpu' },
+        { value: 'libx265', label: 'HEVC (H.265, CPU)', group: 'cpu' },
+        { value: 'libaom-av1', label: 'AV1 (CPU)', group: 'cpu' },
+      ];
+    }
   });
+
+  function buildCodecList(codecData: any): Array<{value: string, label: string, group: string}> {
+    const list: Array<{value: string, label: string, group: string}> = [];
+    const enabledGroups = codecData.enabled_groups || [];
+    
+    // NVIDIA codecs
+    if (enabledGroups.includes('nvidia')) {
+      list.push(
+        { value: 'av1_nvenc', label: 'AV1 (NVENC, Best Quality - RTX 40/30 series)', group: 'nvidia' },
+        { value: 'hevc_nvenc', label: 'HEVC (H.265, NVENC)', group: 'nvidia' },
+        { value: 'h264_nvenc', label: 'H.264 (NVENC, Compatibility)', group: 'nvidia' },
+      );
+    }
+    
+    // Intel codecs
+    if (enabledGroups.includes('intel')) {
+      list.push(
+        { value: 'av1_qsv', label: 'AV1 (Intel QSV - Arc GPUs)', group: 'intel' },
+        { value: 'hevc_qsv', label: 'HEVC (H.265, Intel QSV)', group: 'intel' },
+        { value: 'h264_qsv', label: 'H.264 (Intel QSV)', group: 'intel' },
+      );
+      // Also add VAAPI variants if detected as Intel
+      if (codecData.hardware_type === 'intel' && codecData.available_encoders.h264_vaapi) {
+        list.push(
+          { value: 'h264_vaapi', label: 'H.264 (Intel VAAPI)', group: 'intel' },
+          { value: 'hevc_vaapi', label: 'HEVC (H.265, Intel VAAPI)', group: 'intel' },
+        );
+        if (codecData.available_encoders.av1_vaapi) {
+          list.push({ value: 'av1_vaapi', label: 'AV1 (Intel VAAPI)', group: 'intel' });
+        }
+      }
+    }
+    
+    // AMD codecs
+    if (enabledGroups.includes('amd')) {
+      // Check if AMF or VAAPI
+      if (codecData.available_encoders.h264_amf) {
+        list.push(
+          { value: 'av1_amf', label: 'AV1 (AMD AMF)', group: 'amd' },
+          { value: 'hevc_amf', label: 'HEVC (H.265, AMD AMF)', group: 'amd' },
+          { value: 'h264_amf', label: 'H.264 (AMD AMF)', group: 'amd' },
+        );
+      } else if (codecData.available_encoders.h264_vaapi) {
+        list.push(
+          { value: 'h264_vaapi', label: 'H.264 (AMD VAAPI)', group: 'amd' },
+          { value: 'hevc_vaapi', label: 'HEVC (H.265, AMD VAAPI)', group: 'amd' },
+        );
+        if (codecData.available_encoders.av1_vaapi) {
+          list.push({ value: 'av1_vaapi', label: 'AV1 (AMD VAAPI)', group: 'amd' });
+        }
+      }
+    }
+    
+    // CPU codecs (always available as fallback)
+    if (enabledGroups.includes('cpu')) {
+      list.push(
+        { value: 'libaom-av1', label: 'AV1 (CPU, Slow but High Quality)', group: 'cpu' },
+        { value: 'libx265', label: 'HEVC (H.265, CPU)', group: 'cpu' },
+        { value: 'libx264', label: 'H.264 (CPU)', group: 'cpu' },
+      );
+    }
+    
+    return list;
+  }
 
   function formatSize(bytes: number): string {
     if (bytes < 1024) return `${bytes} B`;
@@ -199,13 +281,13 @@
         <div>
           <label class="block mb-1 text-sm">Video Codec</label>
           <select class="input w-full" bind:value={videoCodec}>
-            <option value="av1_nvenc">AV1 (NVENC, Best Quality - new RTX)</option>
-            <option value="hevc_nvenc">HEVC (H.265, NVENC)</option>
-            <option value="h264_nvenc">H.264 (NVENC, Compatibility)</option>
-            <option value="libaom-av1">AV1 (CPU)</option>
-            <option value="libx265">HEVC (H.265, CPU)</option>
-            <option value="libx264">H.264 (CPU)</option>
+            {#each availableCodecs as codec}
+              <option value={codec.value}>{codec.label}</option>
+            {/each}
           </select>
+          {#if hardwareType !== 'cpu'}
+            <p class="text-xs text-gray-400 mt-1">Detected: {hardwareType.toUpperCase()} acceleration</p>
+          {/if}
         </div>
         <div>
           <label class="block mb-1 text-sm">Audio Codec</label>

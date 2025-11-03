@@ -72,3 +72,9 @@ export function openProgressStream(taskId: string, auth?: {user: string, pass: s
 export function downloadUrl(taskId: string) {
   return `${BACKEND}/api/jobs/${taskId}/download`;
 }
+
+export async function getAvailableCodecs() {
+  const res = await fetch(`${BACKEND}/api/codecs/available`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
