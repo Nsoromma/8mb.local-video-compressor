@@ -48,11 +48,22 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
     # Audio bitrate string
     a_bitrate_str = f"{int(audio_bitrate_kbps)}k"
 
+    # Video codec specific compatibility flags
+    v_flags = []
+    if video_codec == "h264_nvenc":
+        v_flags += ["-profile:v", "high", "-pix_fmt", "yuv420p"]
+    elif video_codec == "hevc_nvenc":
+        v_flags += ["-profile:v", "main", "-pix_fmt", "yuv420p"]
+
+    # MP4 web-friendly
+    mp4_flags = ["-movflags", "+faststart"] if output_path.lower().endswith(".mp4") else []
+
     # Construct command
     cmd = [
         "ffmpeg", "-hide_banner", "-y",
         "-i", input_path,
         "-c:v", video_codec,
+        *v_flags,
         "-b:v", f"{int(video_kbps)}k",
         "-maxrate", f"{maxrate}k",
         "-bufsize", f"{bufsize}k",
@@ -60,6 +71,7 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
         "-tune", "hq",
         "-c:a", chosen_audio_codec,
         "-b:a", a_bitrate_str,
+        *mp4_flags,
         "-progress", "pipe:2",
         output_path,
     ]
