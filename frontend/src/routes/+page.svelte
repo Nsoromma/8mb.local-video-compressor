@@ -5,7 +5,7 @@
 
   let file: File | null = null;
   let targetMB = 25;
-  let videoCodec: 'av1_nvenc' | 'hevc_nvenc' | 'h264_nvenc' | 'libx264' | 'libx265' | 'libsvtav1' = 'av1_nvenc';
+  let videoCodec: 'av1_nvenc' | 'hevc_nvenc' | 'h264_nvenc' | 'libx264' | 'libx265' | 'libaom-av1' | 'libsvtav1' = 'av1_nvenc';
   let audioCodec: 'libopus' | 'aac' = 'libopus';
   let preset: 'p1'|'p2'|'p3'|'p4'|'p5'|'p6'|'p7' = 'p6';
   let audioKbps: 64|96|128|160|192|256 = 128;
@@ -197,7 +197,7 @@
             <option value="av1_nvenc">AV1 (NVENC, Best Quality - new RTX)</option>
             <option value="hevc_nvenc">HEVC (H.265, NVENC)</option>
             <option value="h264_nvenc">H.264 (NVENC, Compatibility)</option>
-            <option value="libsvtav1">AV1 (CPU)</option>
+            <option value="libaom-av1">AV1 (CPU)</option>
             <option value="libx265">HEVC (H.265, CPU)</option>
             <option value="libx264">H.264 (CPU)</option>
           </select>

@@ -6,7 +6,7 @@ from typing import Optional
 def ffprobe_info(input_path: str) -> dict:
     cmd = [
         "ffprobe", "-v", "error",
-        "-show_entries", "format=duration:stream=index,codec_type,bit_rate",
+        "-show_entries", "format=duration:stream=index,codec_type,codec_name,bit_rate",
         "-of", "json",
         input_path,
     ]
@@ -17,12 +17,19 @@ def ffprobe_info(input_path: str) -> dict:
     duration = float(data.get("format", {}).get("duration", 0.0))
     v_bitrate = None
     a_bitrate = None
+    v_codec = None
     for s in data.get("streams", []):
         if s.get("codec_type") == "video" and s.get("bit_rate"):
             v_bitrate = float(s["bit_rate"]) / 1000.0
+            v_codec = s.get("codec_name")
         if s.get("codec_type") == "audio" and s.get("bit_rate"):
             a_bitrate = float(s["bit_rate"]) / 1000.0
-    return {"duration": duration, "video_bitrate_kbps": v_bitrate, "audio_bitrate_kbps": a_bitrate}
+    return {
+        "duration": duration,
+        "video_bitrate_kbps": v_bitrate,
+        "audio_bitrate_kbps": a_bitrate,
+        "video_codec": v_codec,
+    }
 
 
 def calc_bitrates(target_mb: float, duration_s: float, audio_kbps: int):

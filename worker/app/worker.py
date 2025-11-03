@@ -110,7 +110,7 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
         vf_filters.append(f"scale={scale_expr}")
         _publish(self.request.id, {"type": "log", "message": f"Resolution: scaling to max {max_width or 'any'}x{max_height or 'any'}"})
 
-    # Build input options for trimming
+    # Build input options for trimming and decoder preferences
     input_opts = []
     duration_opts = []
     
@@ -148,6 +148,11 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
             # No start time, use -to
             duration_opts = ["-to", str(end_time)]
             _publish(self.request.id, {"type": "log", "message": f"Trimming: end at {end_time}"})
+
+    # Prefer robust AV1 decoder when encoding on CPU and input is AV1
+    if info.get("video_codec") == "av1" and actual_encoder in ("libx264", "libx265", "libaom-av1"):
+        input_opts += ["-c:v", "libdav1d"]
+        _publish(self.request.id, {"type": "log", "message": "Decoder: using libdav1d for AV1 input"})
 
     # Construct command
     cmd = [
@@ -210,12 +215,12 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
         rc = proc.returncode
         if rc != 0:
             msg = f"ffmpeg failed with code {rc}"
-            self.update_state(state="FAILURE", meta={"detail": msg})
+            # Publish error for UI and raise; let Celery handle failure state and exception payload formatting
             _publish(self.request.id, {"type": "error", "message": msg})
             raise RuntimeError(msg)
     except Exception as e:
         msg = str(e)
-        self.update_state(state="FAILURE", meta={"detail": msg})
+        # Do not manually set FAILURE; raising propagates proper exception metadata to Celery backend
         _publish(self.request.id, {"type": "error", "message": msg})
         raise
 

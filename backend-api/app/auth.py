@@ -25,16 +25,16 @@ def basic_auth(credentials: Optional[HTTPBasicCredentials] = Depends(security)):
     if not enabled:
         return
     if not credentials:
+        # Return 401 without WWW-Authenticate header to avoid native browser popup prompts (e.g., for EventSource)
         raise HTTPException(
             status_code=HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
-            headers={"WWW-Authenticate": "Basic"},
         )
     correct_username = (credentials.username == user)
     correct_password = (credentials.password == pwd)
     if not (correct_username and correct_password):
+        # Avoid WWW-Authenticate header to prevent browser basic auth dialog
         raise HTTPException(
             status_code=HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials",
-            headers={"WWW-Authenticate": "Basic"},
         )

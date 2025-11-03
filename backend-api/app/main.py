@@ -188,7 +188,7 @@ async def get_hardware_info():
             "available_encoders": {
                 "h264": "libx264",
                 "hevc": "libx265",
-                "av1": "libsvtav1"
+                "av1": "libaom-av1"
             }
         }
 
