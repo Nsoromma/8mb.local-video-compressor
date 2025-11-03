@@ -170,6 +170,28 @@ async def health():
     return {"ok": True}
 
 
+@app.get("/api/hardware")
+async def get_hardware_info():
+    """Get available hardware acceleration info from worker."""
+    try:
+        # Query worker for hardware capabilities
+        # This is a lightweight check via a Celery task
+        from .celery_app import celery_app
+        result = celery_app.send_task("app.worker.get_hardware_info")
+        hw_info = result.get(timeout=5)
+        return hw_info
+    except Exception as e:
+        # Fallback to CPU-only if worker unavailable
+        return {
+            "type": "cpu",
+            "available_encoders": {
+                "h264": "libx264",
+                "hevc": "libx265",
+                "av1": "libsvtav1"
+            }
+        }
+
+
 # Serve pre-built frontend (for unified container deployment)
 frontend_build = Path("/app/frontend-build")
 if frontend_build.exists():

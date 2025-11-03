@@ -1,6 +1,6 @@
 # 8mb.local – Self‑Hosted GPU Video Compressor
 
-8mb.local is a self‑hosted, fire‑and‑forget video compressor. Drop a file, choose a target size (e.g., 8MB, 25MB, 50MB, 100MB), and let NVIDIA NVENC produce compact outputs with AV1/HEVC/H.264. The stack includes a SvelteKit UI, FastAPI backend, Celery worker, Redis broker, and real‑time progress via Server‑Sent Events (SSE).
+8mb.local is a self‑hosted, fire‑and‑forget video compressor. Drop a file, choose a target size (e.g., 8MB, 25MB, 50MB, 100MB), and let GPU-accelerated encoding produce compact outputs with AV1/HEVC/H.264. Supports **NVIDIA NVENC**, **Intel QSV**, **AMD AMF/VAAPI**, and **CPU fallback**. The stack includes a SvelteKit UI, FastAPI backend, Celery worker, Redis broker, and real‑time progress via Server‑Sent Events (SSE).
 
 ## Screenshots
 
@@ -16,10 +16,14 @@
 </details>
 
 ## Features
+- **Multi-vendor GPU support**: Auto-detects NVIDIA NVENC, Intel QSV, AMD AMF/VAAPI, or falls back to CPU
 - Drag‑and‑drop UI with helpful presets and advanced options (codec, container, tune, audio bitrate)
+- **Resolution control**: Set max width/height while maintaining aspect ratio
+- **Video trimming**: Specify start/end times (seconds or HH:MM:SS format)
 - ffprobe analysis on upload for instant estimates and warnings
 - Real‑time progress and FFmpeg logs via SSE
-- GPU NVENC encoders: AV1, HEVC (H.265), H.264
+- Hardware encoders: AV1, HEVC (H.265), H.264 (GPU-accelerated when available)
+- Software fallback: libx264, libx265, libsvtav1 for CPU-only systems
 - Output container choice: MP4 or MKV, with compatibility safeguards
 
 ## Architecture (technical deep dive)
@@ -37,7 +41,7 @@ flowchart LR
 Components
 - Frontend (SvelteKit + Vite): drag‑and‑drop UI, size estimates, SSE progress/logs, final download.
 - Backend API (FastAPI): accepts uploads, runs ffprobe, relays SSE, and serves downloads.
-- Worker (Celery + FFmpeg 7.x): executes compression with NVIDIA NVENC; parses `ffmpeg -progress` and publishes updates.
+- Worker (Celery + FFmpeg 7.x): executes compression with auto-detected hardware acceleration (NVENC/QSV/AMF/VAAPI/CPU); parses `ffmpeg -progress` and publishes updates.
 - Redis (broker + pub/sub): Celery broker and transport for progress/log events.
 
 Data & files
@@ -85,13 +89,30 @@ Performance tips
 - If speed matters, try Low/Ultra‑Low latency tunes with a faster preset (P1–P4). For best quality, use HQ with P6/P7.
 
 ## GPU support tips
-- Windows: Docker Desktop + WSL2 with GPU enabled; install NVIDIA drivers and the NVIDIA Container Toolkit inside WSL2.
-- Linux: install NVIDIA drivers and the NVIDIA Container Toolkit.
-- Verify encoders inside the worker:
 
-```bash
-docker exec 8mblocal-worker bash -lc "ffmpeg -hide_banner -encoders | grep -i nvenc"
-```
+### Hardware Acceleration Support
+8mb.local automatically detects and uses available hardware acceleration:
+
+- **NVIDIA GPU (NVENC)**: Best support for AV1, HEVC, H.264
+  - Windows: Docker Desktop + WSL2 with GPU enabled; install NVIDIA drivers and Container Toolkit in WSL2
+  - Linux: Install NVIDIA drivers and NVIDIA Container Toolkit
+  - Check: `docker exec 8mblocal-worker bash -lc "ffmpeg -hide_banner -encoders | grep -i nvenc"`
+
+- **Intel GPU (Quick Sync Video - QSV)**: Good support for H.264, HEVC, AV1 (Arc GPUs)
+  - Requires Intel GPU with QSV support (most 6th gen+ Core CPUs and Arc GPUs)
+  - Linux: Ensure `/dev/dri` is accessible in container
+  - Check: `docker exec 8mblocal-worker bash -lc "ffmpeg -hide_banner -encoders | grep -i qsv"`
+
+- **AMD GPU (AMF/VAAPI)**: Support for H.264, HEVC, AV1
+  - Windows: AMD AMF (hardware-accelerated encoding)
+  - Linux: VAAPI (requires Mesa drivers and `/dev/dri` access)
+  - Check: `docker exec 8mblocal-worker bash -lc "ffmpeg -hide_banner -encoders | grep -E 'amf|vaapi'"`
+
+- **CPU Fallback**: Works on any system without GPU
+  - Uses libx264 (H.264), libx265 (HEVC), libsvtav1 (AV1)
+  - Slower but universal compatibility
+
+The system will automatically select the best available encoder at runtime. You'll see a log message like "Hardware: NVIDIA acceleration detected" when compression starts.
 
 ## Installation
 Run with prebuilt images (recommended) or build locally.
@@ -105,7 +126,7 @@ docker compose -f docker-compose.hub.yml up -d
 
 Frontend: http://localhost:5173  •  Backend: http://localhost:8000
 
-Requires NVIDIA GPU runtime for the worker (Compose uses `gpus: all`).
+**Note**: GPU acceleration is optional. The system auto-detects available hardware (NVIDIA/Intel/AMD/CPU) and adapts accordingly.
 
 ### Build locally
 1. Copy `.env.example` to `.env` and adjust values.
@@ -124,15 +145,19 @@ docker compose -f docker-compose.hub.yml up -d
 ```
 
 ### Troubleshooting
-- NVENC not listed: confirm NVIDIA drivers and Container Toolkit are installed; try restarting Docker.
-- Permission denied writing uploads/outputs: ensure your OS user owns the repo folders or adjust volume permissions.
-- Ports in use: change `5173`/`8000` mappings in compose.
-- No progress events: ensure the frontend can reach `http://localhost:8000` directly (SSE shouldn’t be buffered by a proxy).
+- No hardware acceleration: System will fall back to CPU encoding. Check Docker logs for "Hardware: CPU acceleration detected"
+- NVENC not available: Confirm NVIDIA drivers and Container Toolkit are installed; try restarting Docker
+- Intel QSV not working: Ensure `/dev/dri` device is accessible and Intel GPU drivers are installed
+- AMD encoding issues: Check for Mesa drivers (Linux) or recent AMD drivers (Windows)
+- Permission denied writing uploads/outputs: ensure your OS user owns the repo folders or adjust volume permissions
+- Ports in use: change `5173`/`8000` mappings in compose
+- No progress events: ensure the frontend can reach `http://localhost:8000` directly (SSE shouldn't be buffered by a proxy)
 
 ## Maintainers
 - Images are built and published from CI on pushes to `main`. See `docs/DOCKER_HUB.md` for maintainer‑focused publishing steps.
 
 ## Notes
-- AV1 (av1_nvenc) requires recent RTX GPUs and up‑to‑date drivers.
-- MP4 + Opus is not supported; the worker auto‑encodes AAC in MP4.
-- Consider HTTPS termination and stronger auth for public deployments.
+- Hardware acceleration is automatically detected and used when available (NVIDIA/Intel/AMD)
+- AV1 support varies by hardware: NVIDIA (RTX 40-series+), Intel (Arc GPUs), AMD (RDNA 3+), or CPU fallback
+- MP4 + Opus is not supported; the worker auto‑encodes AAC in MP4
+- Consider HTTPS termination and stronger auth for public deployments

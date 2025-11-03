@@ -9,6 +9,7 @@ from redis import Redis
 
 from .celery_app import celery_app
 from .utils import ffprobe_info, calc_bitrates
+from .hw_detect import get_hw_info, map_codec_to_hw
 
 REDIS = None
 
@@ -24,10 +25,20 @@ def _publish(task_id: str, event: Dict):
     _redis().publish(f"progress:{task_id}", json.dumps(event))
 
 
+@celery_app.task(name="app.worker.get_hardware_info")
+def get_hardware_info_task():
+    """Return hardware acceleration info for the frontend."""
+    return get_hw_info()
+
+
 @celery_app.task(name="app.worker.compress_video", bind=True)
 def compress_video(self, job_id: str, input_path: str, output_path: str, target_size_mb: float,
                    video_codec: str, audio_codec: str, audio_bitrate_kbps: int, preset: str, tune: str = "hq",
                    max_width: int = None, max_height: int = None, start_time: str = None, end_time: str = None):
+    # Detect hardware acceleration
+    hw_info = get_hw_info()
+    _publish(self.request.id, {"type": "log", "message": f"Hardware: {hw_info['type'].upper()} acceleration detected"})
+    
     # Probe
     info = ffprobe_info(input_path)
     duration = info.get("duration", 0.0)
@@ -50,12 +61,36 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
     # Audio bitrate string
     a_bitrate_str = f"{int(audio_bitrate_kbps)}k"
 
-    # Video codec specific compatibility flags
-    v_flags = []
-    if video_codec == "h264_nvenc":
-        v_flags += ["-profile:v", "high", "-pix_fmt", "yuv420p"]
-    elif video_codec == "hevc_nvenc":
-        v_flags += ["-profile:v", "main", "-pix_fmt", "yuv420p"]
+    # Map requested codec to available hardware encoder
+    actual_encoder, v_flags = map_codec_to_hw(video_codec, hw_info)
+    if actual_encoder != video_codec:
+        _publish(self.request.id, {"type": "log", "message": f"Using encoder: {actual_encoder} (requested: {video_codec})"})
+    
+    # Add preset/tune for compatible encoders
+    preset_flags = []
+    tune_flags = []
+    
+    if actual_encoder.endswith("_nvenc"):
+        # NVIDIA NVENC
+        preset_flags = ["-preset", preset_val]
+        tune_flags = ["-tune", tune_val]
+    elif actual_encoder.endswith("_qsv"):
+        # Intel QSV - map presets
+        qsv_preset_map = {"p1": "veryfast", "p2": "faster", "p3": "fast", "p4": "medium", "p5": "slow", "p6": "slower", "p7": "veryslow"}
+        preset_flags = ["-preset", qsv_preset_map.get(preset_val, "medium")]
+    elif actual_encoder.endswith("_amf"):
+        # AMD AMF
+        amf_preset_map = {"p1": "speed", "p2": "speed", "p3": "balanced", "p4": "balanced", "p5": "quality", "p6": "quality", "p7": "quality"}
+        preset_flags = ["-quality", amf_preset_map.get(preset_val, "balanced")]
+    elif actual_encoder.endswith("_vaapi"):
+        # VAAPI - limited preset support
+        preset_flags = ["-compression_level", "7"]  # 0-7 scale
+    elif actual_encoder in ("libx264", "libx265", "libsvtav1"):
+        # Software encoders
+        cpu_preset_map = {"p1": "ultrafast", "p2": "superfast", "p3": "veryfast", "p4": "faster", "p5": "fast", "p6": "medium", "p7": "slow"}
+        preset_flags = ["-preset", cpu_preset_map.get(preset_val, "medium")]
+        if actual_encoder == "libx264":
+            tune_flags = ["-tune", "film"]  # Better than 'hq' for CPU
 
     # MP4 web-friendly
     mp4_flags = ["-movflags", "+faststart"] if output_path.lower().endswith(".mp4") else []
@@ -120,7 +155,7 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
         *input_opts,  # -ss before input for fast seeking
         "-i", input_path,
         *duration_opts,  # -t or -to for duration/end
-        "-c:v", video_codec,
+        "-c:v", actual_encoder,  # Use detected encoder
         *v_flags,
     ]
     
@@ -132,8 +167,8 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
         "-b:v", f"{int(video_kbps)}k",
         "-maxrate", f"{maxrate}k",
         "-bufsize", f"{bufsize}k",
-        "-preset", preset_val,
-        "-tune", tune_val,
+        *preset_flags,  # Encoder-specific preset
+        *tune_flags,    # Encoder-specific tune (if supported)
         "-c:a", chosen_audio_codec,
         "-b:a", a_bitrate_str,
         *mp4_flags,
