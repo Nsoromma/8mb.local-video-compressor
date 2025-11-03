@@ -381,11 +381,14 @@ docker compose up -d
 ### Troubleshooting
 
 #### Hardware Acceleration Issues
-- **NVENC not available**: 
-  - Confirm NVIDIA drivers installed: `nvidia-smi`
+- **NVENC not available or "Operation not permitted" error**: 
+  - Confirm NVIDIA drivers installed on host: `nvidia-smi`
+  - Check driver version in container: `docker exec 8mblocal nvidia-smi`
+  - Verify CUDA libraries accessible: `docker exec 8mblocal bash -c "ls -l /usr/lib/x86_64-linux-gnu/libnvidia-encode.so*"`
   - On Linux: Install [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
   - Verify `--gpus all` flag is used in docker run command
   - Check logs: `docker logs 8mblocal | grep -i nvidia`
+  - **If NVENC keeps failing**: Disable NVENC codecs in Settings → Available Codecs and use CPU or VAAPI instead
   
 - **Intel QSV not working**: 
   - Ensure `/dev/dri` exists: `ls -l /dev/dri`
@@ -405,6 +408,27 @@ docker compose up -d
 - Check Settings → Available Codecs to see what's enabled
 - Look for log messages: "Warning: X not available, falling back to CPU (Y)"
 - CPU encoding works but is slower - consider enabling fewer codecs or using faster presets
+
+#### NVENC "Operation not permitted" Error
+This error occurs when NVENC encoder fails to initialize. Common causes:
+1. **Driver mismatch**: Host and container NVIDIA driver versions don't match
+   - Check host: `nvidia-smi`
+   - Check container: `docker exec 8mblocal nvidia-smi`
+   - Solution: Update host drivers or pull latest image
+   
+2. **Missing NVIDIA Container Toolkit**: Docker can't access GPU
+   - Install: `distribution=$(. /etc/os-release;echo $ID$VERSION_ID) && curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg && curl -s -L https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-container.list | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list && sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit`
+   - Restart Docker: `sudo systemctl restart docker`
+   
+3. **Insufficient permissions**: Container can't access encoder
+   - Try adding `--privileged` flag (not recommended for production)
+   - Better solution: Fix Container Toolkit installation
+   
+4. **Workaround**: Disable NVENC and use CPU or VAAPI
+   - Go to Settings → Available Codecs
+   - Uncheck all NVENC codecs (H.264/HEVC/AV1)
+   - Enable CPU codecs or VAAPI if you have Intel/AMD GPU
+   - System will automatically use available encoders
 
 #### General Issues
 - **Permission denied writing uploads/outputs**: 
@@ -433,7 +457,37 @@ docker compose up -d
 - Check the logs: `docker logs 8mblocal`
 - View ffmpeg command in UI logs during compression
 - Visit Settings → GPU Support for hardware compatibility reference
+- Verify GPU access: `docker exec 8mblocal nvidia-smi` (NVIDIA) or `docker exec 8mblocal ls -l /dev/dri` (VAAPI)
+- Check available encoders: `docker exec 8mblocal bash -c "ffmpeg -hide_banner -encoders | grep -E 'nvenc|qsv|vaapi|264|265|av1'"`
 - Open an issue on GitHub with logs and system details
+
+### Quick Troubleshooting Commands
+
+```bash
+# Check if container is running
+docker ps | grep 8mblocal
+
+# View container logs
+docker logs 8mblocal
+
+# Check NVIDIA GPU status (if using NVENC)
+docker exec 8mblocal nvidia-smi
+
+# Check available video devices (if using VAAPI)
+docker exec 8mblocal ls -l /dev/dri
+
+# List available encoders in container
+docker exec 8mblocal bash -c "ffmpeg -hide_banner -encoders | grep -E 'nvenc|qsv|vaapi|264|265|av1'"
+
+# Check NVIDIA libraries (if using NVENC)
+docker exec 8mblocal bash -c "ls -l /usr/lib/x86_64-linux-gnu/libnvidia-encode.so*"
+
+# Restart container
+docker restart 8mblocal
+
+# View real-time logs
+docker logs -f 8mblocal
+```
 
 ## Notes
 - Hardware acceleration is automatically detected and validated at runtime
