@@ -63,10 +63,11 @@
 
   onMount(async () => {
 	try {
-	  const [authRes, presetsRes, codecsRes] = await Promise.all([
+	  const [authRes, presetsRes, codecsRes, historyRes] = await Promise.all([
 		fetch('/api/settings/auth'),
 		fetch('/api/settings/presets'),
-		fetch('/api/settings/codecs')
+		fetch('/api/settings/codecs'),
+		fetch('/api/settings/history')
 	  ]);
 	  if (authRes.ok) {
 		const a: AuthSettings = await authRes.json();
@@ -86,6 +87,10 @@
 	  if (codecsRes.ok) {
 		const c: CodecVisibilitySettings = await codecsRes.json();
 		codecSettings = c;
+	  }
+	  if (historyRes.ok) {
+		const h = await historyRes.json();
+		historyEnabled = h.enabled || false;
 	  }
 	} catch (e) {
 	  error = 'Failed to load settings';
@@ -183,6 +188,30 @@
 	  }
 	} catch (e) {
 	  error = 'Failed to save codec settings';
+	} finally {
+	  saving = false;
+	}
+  }
+
+  async function saveHistorySettings() {
+	error = '';
+	message = '';
+	saving = true;
+	try {
+	  const res = await fetch('/api/settings/history', {
+		method: 'PUT',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ enabled: historyEnabled })
+	  });
+	  if (res.ok) {
+		const data = await res.json();
+		message = data.message || 'Saved history settings';
+	  } else {
+		const data = await res.json();
+		error = data.detail || 'Failed to save history settings';
+	  }
+	} catch (e) {
+	  error = 'Failed to save history settings';
 	} finally {
 	  saving = false;
 	}
@@ -335,6 +364,30 @@
 
 	<div style="margin-top:16px">
 	  <button class="btn" on:click={saveCodecs} disabled={saving}>{saving ? 'Saving…' : 'Save codec settings'}</button>
+	</div>
+  </div>
+
+  <!-- Compression History -->
+  <div class="card">
+	<div class="title">📊 Compression History</div>
+	<p class="label" style="margin-bottom:16px; color:#9ca3af">
+	  Track completed compression jobs with metadata (filenames, sizes, codecs, presets). No video files are stored.
+	</p>
+
+	<div class="switch" style="margin-bottom:16px">
+	  <input id="history_enabled" type="checkbox" bind:checked={historyEnabled} />
+	  <label class="label" for="history_enabled" style="margin:0">Enable compression history tracking</label>
+	</div>
+
+	<div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap">
+	  <button class="btn" on:click={saveHistorySettings} disabled={saving}>
+		{saving ? 'Saving…' : 'Save history settings'}
+	  </button>
+	  {#if historyEnabled}
+		<a href="/history" class="btn alt" style="text-decoration:none; display:inline-block">
+		  View History →
+		</a>
+	  {/if}
 	</div>
   </div>
 
