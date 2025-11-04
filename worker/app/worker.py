@@ -290,18 +290,40 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
             duration_opts = ["-to", str(end_time)]
             _publish(self.request.id, {"type": "log", "message": f"Trimming: end at {end_time}"})
 
-    # Prefer robust AV1 software decoder for AV1 input across all encode paths to avoid unsupported HW decode
-    if info.get("video_codec") == "av1":
-        input_opts += ["-c:v", "libdav1d"]
-        _publish(self.request.id, {"type": "log", "message": "Decoder: using libdav1d for AV1 input"})
+    # Decide decoder strategy based on input codec and runtime capability
+    in_codec = info.get("video_codec")
 
-    # Enable CUDA hardware decode only for codecs typically supported by NVDEC
-    try:
-        if actual_encoder.endswith("_nvenc") and info.get("video_codec") in ("h264", "hevc"):
+    def can_cuda_decode(path: str) -> bool:
+        try:
+            test_cmd = [
+                "ffmpeg", "-hide_banner", "-v", "error",
+                "-hwaccel", "cuda",
+                "-ss", "0",
+                "-t", "0.1",
+                "-i", path,
+                "-f", "null", "-"
+            ]
+            r = subprocess.run(test_cmd, capture_output=True, text=True, timeout=10)
+            stderr = (r.stderr or "").lower()
+            if "doesn't support hardware accelerated" in stderr or "failed setup for format cuda" in stderr:
+                return False
+            # Return code isn't always indicative; absence of the above errors is a good proxy
+            return r.returncode == 0 or "error" not in stderr
+        except Exception:
+            return False
+
+    # AV1: Prefer HW decode only if actually supported; otherwise libdav1d
+    if in_codec == "av1":
+        if actual_encoder.endswith("_nvenc") and can_cuda_decode(input_path):
             init_hw_flags = ["-hwaccel", "cuda"] + init_hw_flags
-            _publish(self.request.id, {"type": "log", "message": "Decoder: using cuda"})
-    except Exception:
-        pass
+            _publish(self.request.id, {"type": "log", "message": "Decoder: using cuda (AV1)"})
+        else:
+            input_opts += ["-c:v", "libdav1d"]
+            _publish(self.request.id, {"type": "log", "message": "Decoder: using libdav1d for AV1 input"})
+    elif in_codec in ("h264", "hevc") and actual_encoder.endswith("_nvenc"):
+        # H.264/HEVC: NVDEC widely supported
+        init_hw_flags = ["-hwaccel", "cuda"] + init_hw_flags
+        _publish(self.request.id, {"type": "log", "message": f"Decoder: using cuda ({in_codec})"})
 
     # Construct command
     cmd = [

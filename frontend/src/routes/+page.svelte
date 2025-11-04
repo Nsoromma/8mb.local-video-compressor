@@ -33,6 +33,7 @@
   let jobInfo: any = null;
   let taskId: string | null = null;
   let progress = 0;
+  let displayedProgress = 0;
   let logLines: string[] = [];
   let doneStats: any = null;
   let isCompressing = false;
@@ -48,6 +49,8 @@
   let etaLabel: string | null = null;
   let currentSpeedX: number | null = null;
   let hasProgress = false;
+  let decodeMethod: string | null = null;
+  let encodeMethod: string | null = null;
   // Support widget state
   let showSupport = false;
   function toggleSupport(){ showSupport = !showSupport; }
@@ -313,6 +316,8 @@
         try { const data = JSON.parse(ev.data);
           if (data.type === 'progress') {
             progress = data.progress;
+            // Cap UI at 99% until done event to avoid long 100% stalls
+            displayedProgress = Math.min(99, Math.max(0, progress || 0));
             if (progress > 0) {
               hasProgress = true;
               // Prefer duration/speed-based ETA when available
@@ -339,6 +344,14 @@
                 }
               }
             }
+            // Capture pipeline hints
+            if (data.message.startsWith('Decoder:')) {
+              decodeMethod = data.message.replace('Decoder: ', '').trim();
+            }
+            if (data.message.startsWith('Using encoder:')) {
+              const m2 = data.message.match(/Using encoder:\s*([^\s]+)\s*\(requested:/i);
+              if (m2) encodeMethod = m2[1];
+            }
             logLines = [data.message, ...logLines].slice(0, 500);
           }
           if (data.type === 'canceled') {
@@ -349,6 +362,7 @@
           if (data.type === 'done') { 
             doneStats = data.stats; 
             progress = 100;
+            displayedProgress = 100;
             isCompressing = false;
             startedAt = null; etaSeconds = null; etaLabel = null; currentSpeedX = null; hasProgress = false;
             try { esRef?.close(); } catch {}
@@ -424,7 +438,7 @@
     }
   }
 
-  function reset(){ file=null; uploadedFileName=null; jobInfo=null; taskId=null; progress=0; logLines=[]; doneStats=null; warnText=null; errorText=null; isUploading=false; isCompressing=false; try { esRef?.close(); } catch {} }
+  function reset(){ file=null; uploadedFileName=null; jobInfo=null; taskId=null; progress=0; displayedProgress=0; logLines=[]; doneStats=null; warnText=null; errorText=null; isUploading=false; isCompressing=false; decodeMethod=null; encodeMethod=null; try { esRef?.close(); } catch {} }
   $: (() => { /* clear ETA when not compressing */ if (!isCompressing) { startedAt = null; etaSeconds = null; etaLabel = null; currentSpeedX = null; hasProgress = false; } })();
 
   async function onCancel(){
@@ -703,12 +717,17 @@
 
   {#if taskId}
     <div class="card">
+      {#if decodeMethod || encodeMethod}
+        <div class="text-xs text-gray-400 mb-2">
+          Pipeline: {decodeMethod || 'auto'} → {encodeMethod || (videoCodec || 'auto')}
+        </div>
+      {/if}
       <div class="h-3 bg-gray-800 rounded">
-        <div class="h-3 bg-indigo-600 rounded" style={`width:${progress}%`}></div>
+        <div class="h-3 bg-indigo-600 rounded" style={`width:${displayedProgress}%`}></div>
       </div>
       <div class="mt-2 text-xs text-gray-400 flex items-center justify-between">
-        <span>{progress}%</span>
-        {#if isCompressing && etaLabel}
+        <span>{displayedProgress}%{#if isCompressing && displayedProgress>=99 && !doneStats} (finalizing…){/if}</span>
+        {#if isCompressing && etaLabel && displayedProgress<99}
           <span>~{etaLabel} remaining</span>
         {/if}
       </div>
@@ -800,7 +819,14 @@
           <div>Uploading… {uploadProgress}%</div>
         {:else if isCompressing}
           {#if hasProgress}
-            <div>Compressing… {progress}%{#if etaLabel} — ~{etaLabel} left{/if}</div>
+            <div>
+              Compressing… {displayedProgress}%
+              {#if displayedProgress<99 && etaLabel}
+                — ~{etaLabel} left
+              {:else if displayedProgress>=99}
+                — finalizing…
+              {/if}
+            </div>
           {:else}
             <div>Starting…</div>
           {/if}
