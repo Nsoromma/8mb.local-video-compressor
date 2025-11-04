@@ -169,72 +169,63 @@ async def on_startup():
 
 
 async def _sync_codec_settings_from_tests(timeout_s: int = 60):
-    """Poll Redis for worker encoder test results and update codec visibility settings.
+    """Initialize codec visibility based primarily on detected hardware.
 
-    Goal: Only enable codecs that passed startup validation so the Settings UI
-    reflects actual support as soon as the container starts.
+    Changes from prior behavior:
+    - Do NOT gate visibility on startup test pass/fail (tests can fail due to
+      permissions even when hardware exists). This avoids hiding NVIDIA options
+      when GPUs are present.
+    - CPU codecs are always enabled and are not tested at startup.
     """
-    all_codecs = [
-        'h264_nvenc','hevc_nvenc','av1_nvenc',
-        'h264_qsv','hevc_qsv','av1_qsv',
-        'h264_vaapi','hevc_vaapi','av1_vaapi',
-        'h264_amf','hevc_amf','av1_amf',
-        'libx264','libx265','libaom-av1'
-    ]
-    # Poll until we see at least one encoder_test key or we time out
-    deadline = time.time() + max(1, timeout_s)
-    seen_any = False
-    while time.time() < deadline:
-        try:
-            values = await asyncio.gather(*[redis.get(f"encoder_test:{c}") for c in all_codecs])
-            if any(v is not None for v in values):
-                seen_any = True
-                break
-        except Exception:
-            # Redis may not be ready yet
-            pass
-        await asyncio.sleep(1)
-
-    if not seen_any:
-        # Mark that no sync occurred (for UI awareness)
-        try:
-            await redis.set("startup:codec_visibility_synced", "0")
-        except Exception:
-            pass
-        return
-
-    # Build settings payload: enable only codecs with "1"; always keep CPU codecs enabled
-    payload: dict[str, bool] = {}
     try:
-        results = {}
-        for c in all_codecs:
-            try:
-                v = await redis.get(f"encoder_test:{c}")
-                results[c] = (v == '1') if v is not None else False
-            except Exception:
-                results[c] = False
-        # CPU codecs should default to True even if not tested
-        results['libx264'] = True
-        results['libx265'] = True
-        results['libaom-av1'] = True
+        # Get hardware info (cached) to determine which encoders to expose
+        hw_info = _get_hw_info_cached() or {}
+        avail = hw_info.get("available_encoders", {})  # e.g., {"h264": "h264_nvenc", ...}
 
-        # Map to settings keys and apply
-        for c in all_codecs:
-            key = c.replace('-', '_')  # libaom-av1 -> libaom_av1
-            payload[key] = bool(results.get(c, False))
+        # Start with everything disabled for HW codecs; CPU codecs always enabled
+        payload: dict[str, bool] = {
+            # NVIDIA
+            "h264_nvenc": False,
+            "hevc_nvenc": False,
+            "av1_nvenc": False,
+            # Intel QSV
+            "h264_qsv": False,
+            "hevc_qsv": False,
+            "av1_qsv": False,
+            # VAAPI
+            "h264_vaapi": False,
+            "hevc_vaapi": False,
+            "av1_vaapi": False,
+            # AMD AMF
+            "h264_amf": False,
+            "hevc_amf": False,
+            "av1_amf": False,
+            # CPU (always on; no startup tests needed)
+            "libx264": True,
+            "libx265": True,
+            "libaom_av1": True,
+        }
+
+        # Enable exactly what the worker reports as available encoders
+        # Values in 'avail' are concrete encoder names like 'h264_nvenc', 'hevc_qsv', etc.
+        for v in avail.values():
+            key = v.replace('-', '_')
+            if key in payload:
+                payload[key] = True
 
         # Persist to .env via settings manager (handles write failures gracefully)
         from . import settings_manager as _sm
         _sm.update_codec_visibility_settings(payload)
-        logger.info("Applied codec visibility from startup tests: %s", ', '.join([k for k, v in payload.items() if v]))
-        # Flag for UI banner: synced from hardware tests
+        logger.info("Applied codec visibility from detected hardware: %s", ', '.join([k for k, v in payload.items() if v]))
+
+        # Flag for UI banner: synced on startup
         try:
             await redis.set("startup:codec_visibility_synced", "1")
             await redis.set("startup:codec_visibility_synced_at", str(int(time.time())))
         except Exception:
             pass
     except Exception as e:
-        logger.warning(f"Failed to apply codec visibility from tests: {e}")
+        logger.warning(f"Failed to apply codec visibility from hardware: {e}")
         try:
             await redis.set("startup:codec_visibility_synced", "0")
         except Exception:
@@ -489,20 +480,9 @@ async def get_available_codecs() -> AvailableCodecsResponse:
         # Get user codec visibility settings
         codec_settings = settings_manager.get_codec_visibility_settings()
         
-        # Check which encoders actually passed startup tests (from worker)
-        tested_codecs = {}
-        try:
-            all_codecs = ['h264_nvenc', 'hevc_nvenc', 'av1_nvenc', 'h264_qsv', 'hevc_qsv', 
-                         'av1_qsv', 'h264_vaapi', 'hevc_vaapi', 'av1_vaapi', 
-                         'h264_amf', 'hevc_amf', 'av1_amf',
-                         'libx264', 'libx265', 'libaom-av1']
-            for codec in all_codecs:
-                result = await redis.get(f"encoder_test:{codec}")
-                tested_codecs[codec] = (result == "1") if result else None  # None = not tested
-        except Exception as e:
-            logger.warning(f"Failed to get encoder test results: {e}")
-        
-        # Build list of enabled codecs based on user settings AND test results
+        # Build list of enabled codecs based solely on user settings (which are
+        # initialized from detected hardware at startup). We do not gate UI by
+        # startup test results to avoid hiding options due to transient failures.
         enabled_codecs = []
         codec_map = {
             'h264_nvenc': codec_settings.get('h264_nvenc', True),
@@ -521,11 +501,8 @@ async def get_available_codecs() -> AvailableCodecsResponse:
             'libx265': codec_settings.get('libx265', True),
             'libaom-av1': codec_settings.get('libaom_av1', True),
         }
-        
         for codec, is_enabled in codec_map.items():
-            # Only include if: enabled in settings AND (not tested OR passed test)
-            test_result = tested_codecs.get(codec)
-            if is_enabled and (test_result is None or test_result is True):
+            if is_enabled:
                 enabled_codecs.append(codec)
         
         return AvailableCodecsResponse(
