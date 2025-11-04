@@ -495,37 +495,20 @@
     }
   }
 
-  // Try Download handler with smart polling to avoid opening an error JSON page
+  // Try Download handler: attempt download immediately via server's wait parameter
   async function tryDownloadNow(){
     if (!taskId) return;
     tryDownloading = true;
-    showTryDownload = true;
     const url = downloadUrl(taskId);
-    let attempt = 0;
-    let ok = false;
-    while (attempt < 8) { // ~ up to ~6-8 seconds with backoff
-      try {
-        const u = `${url}?wait=1`;
-        const res = await fetch(u, { method: 'HEAD', cache: 'no-store' });
-        if (res.ok) {
-          ok = true;
-          break;
-        }
-      } catch {}
-      const backoff = Math.min(200 * Math.pow(1.7, attempt), 1500);
-      await new Promise(r => setTimeout(r, backoff));
-      attempt++;
-    }
-    if (ok) {
-      isReady = true;
-      isFinalizing = false;
-      tryDownloading = false;
-      showTryDownload = false;
-      // Trigger the actual download in the same tab
-      window.location.href = url;
-    } else {
-      // Keep the button, but indicate we'll keep trying briefly in the background
-      tryDownloading = false;
+    // Just open the URL with ?wait=2 to give the backend time to finalize
+    // If it's not ready, the backend will return a 404 with detail JSON, but at least
+    // the finalization watchdog will keep polling and eventually succeed
+    try {
+      // Use window.location with wait parameter; if it fails, browser shows download or error
+      window.location.href = `${url}?wait=2`;
+    } finally {
+      // Reset state after a moment (the page may navigate away if download succeeds)
+      setTimeout(() => { tryDownloading = false; }, 1000);
     }
   }
 
