@@ -198,6 +198,7 @@ async def compress(req: CompressRequest):
             max_height=req.max_height,
             start_time=req.start_time,
             end_time=req.end_time,
+            force_hw_decode=bool(req.force_hw_decode or False),
         ),
     )
     return {"task_id": task.id}

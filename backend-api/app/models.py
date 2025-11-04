@@ -25,6 +25,8 @@ class CompressRequest(BaseModel):
     max_height: Optional[int] = None
     start_time: Optional[str] = None  # Format: seconds (float) or "HH:MM:SS"
     end_time: Optional[str] = None    # Format: seconds (float) or "HH:MM:SS"
+    # Prefer attempting GPU decoding (when available). Worker will still fall back if unsupported.
+    force_hw_decode: Optional[bool] = False
 
 class StatusResponse(BaseModel):
     state: str

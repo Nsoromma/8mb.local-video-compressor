@@ -13,6 +13,8 @@
   let fileSizeLabel: string | null = null;
   let container: 'mp4' | 'mkv' = 'mp4';
   let tune: 'hq'|'ll'|'ull'|'lossless' = 'hq';
+  // Decoder preference
+  let preferHwDecode: boolean = true; // Prefer hardware decoding when available
   // New resolution and trim controls
   let maxWidth: number | null = null;
   let maxHeight: number | null = null;
@@ -21,6 +23,7 @@
   // New UI options
   let playSoundWhenDone = true; // default ON
   let autoDownload = true;
+  let warnText: string | null = null;
   
   $: containerNote = (container === 'mp4' && audioCodec === 'libopus') ? 'MP4 does not support Opus; audio will be encoded as AAC automatically.' : null;
   $: estimated = jobInfo ? {
@@ -29,6 +32,8 @@
     video_kbps: jobInfo.duration_s > 0 ? Math.max(((targetMB * 8192.0) / jobInfo.duration_s) - (audioCodec === 'none' ? 0 : audioKbps), 0) : 0,
     final_mb: targetMB
   } : null;
+  // Update warning dynamically based on current estimate (no need to re-upload)
+  $: warnText = estimated && estimated.video_kbps < 100 ? `Warning: Very low video bitrate (${Math.round(estimated.video_kbps)} kbps)` : null;
 
   let jobInfo: any = null;
   let taskId: string | null = null;
@@ -38,7 +43,6 @@
   let doneStats: any = null;
   let isCompressing = false;
   let esRef: EventSource | null = null;
-  let warnText: string | null = null;
   let errorText: string | null = null;
   let isUploading = false;
   let uploadProgress = 0;
@@ -250,10 +254,7 @@
     if (f) {
       file = f;
       fileSizeLabel = formatSize(f.size);
-      // Only upload if it's a different file
-      if (uploadedFileName !== f.name && !isUploading) {
-        await doUpload();
-      }
+      // Do not auto-upload on drop; require explicit Analyze click
     }
   }
   function allowDrop(e: DragEvent){ e.preventDefault(); }
@@ -261,6 +262,11 @@
   async function doUpload(){
     if (!file) return;
     if (isUploading) return;
+    // Skip re-upload when same file is already uploaded; recompute client-side estimates only
+    if (uploadedFileName === file.name && jobInfo?.filename) {
+      warnText = (estimated && estimated.video_kbps < 100) ? `Warning: Very low video bitrate (${Math.round(estimated.video_kbps)} kbps)` : null;
+      return;
+    }
     isUploading = true;
     uploadProgress = 0;
     errorText = null;
@@ -269,7 +275,8 @@
       jobInfo = await uploadWithProgress(file, targetMB, audioKbps, { onProgress: (p:number)=>{ uploadProgress = p; } });
       console.log('Upload response:', jobInfo);
       uploadedFileName = file.name; // Mark this file as uploaded
-      warnText = jobInfo.warn_low_quality ? `Warning: Very low video bitrate (${Math.round(jobInfo.estimate_video_kbps)} kbps)` : null;
+      // Set warn based on current client-side estimate
+      warnText = (estimated && estimated.video_kbps < 100) ? `Warning: Very low video bitrate (${Math.round(estimated.video_kbps)} kbps)` : null;
     } catch (err: any) {
       console.error('Upload failed:', err);
       errorText = `Upload failed: ${err.message || err}`;
@@ -300,6 +307,7 @@
         preset,
         container,
         tune,
+        force_hw_decode: preferHwDecode,
         // Optional resolution and trim parameters
         max_width: maxWidth || undefined,
         max_height: maxHeight || undefined,
@@ -504,7 +512,7 @@
     <div class="border-2 border-dashed border-gray-700 rounded p-8 text-center"
          on:drop={onDrop} on:dragover={allowDrop}>
       <p class="mb-2">Drag & drop a video here</p>
-      <input type="file" accept="video/*" on:change={async (e:any)=>{ const f=e.target.files?.[0]||null; file=f; fileSizeLabel = f? formatSize(f.size): null; if (f && uploadedFileName !== f.name) { await doUpload(); } }} />
+  <input type="file" accept="video/*" on:change={(e:any)=>{ const f=e.target.files?.[0]||null; file=f; fileSizeLabel = f? formatSize(f.size): null; /* No auto-upload on change */ }} />
       {#if file}
         <p class="mt-2 text-sm text-gray-400">{file.name} {#if fileSizeLabel}<span class="opacity-70">• {fileSizeLabel}</span>{/if}</p>
       {/if}
@@ -661,6 +669,10 @@
           <label class="flex items-center gap-2 cursor-pointer">
             <input type="checkbox" bind:checked={autoDownload} class="w-4 h-4" />
             <span class="text-sm">⬇️ Auto-download when done</span>
+          </label>
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" bind:checked={preferHwDecode} class="w-4 h-4" />
+            <span class="text-sm">⚡ Prefer hardware decoding</span>
           </label>
         </div>
       </div>

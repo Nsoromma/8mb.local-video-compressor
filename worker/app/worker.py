@@ -43,7 +43,8 @@ def get_hardware_info_task():
 @celery_app.task(name="worker.worker.compress_video", bind=True)
 def compress_video(self, job_id: str, input_path: str, output_path: str, target_size_mb: float,
                    video_codec: str, audio_codec: str, audio_bitrate_kbps: int, preset: str, tune: str = "hq",
-                   max_width: int = None, max_height: int = None, start_time: str = None, end_time: str = None):
+                   max_width: int = None, max_height: int = None, start_time: str = None, end_time: str = None,
+                   force_hw_decode: bool = False):
     start_ts = time.time()
     # Detect hardware acceleration
     hw_info = get_hw_info()
@@ -293,6 +294,13 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
     # Decide decoder strategy based on input codec and runtime capability
     in_codec = info.get("video_codec")
 
+    def has_decoder(dec_name: str) -> bool:
+        try:
+            r = subprocess.run(["ffmpeg", "-hide_banner", "-decoders"], capture_output=True, text=True, timeout=5)
+            return (r.returncode == 0) and (dec_name in (r.stdout or ""))
+        except Exception:
+            return False
+
     def can_cuda_decode(path: str) -> bool:
         try:
             test_cmd = [
@@ -312,12 +320,47 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
         except Exception:
             return False
 
+    def can_av1_cuvid_decode(path: str) -> bool:
+        if not has_decoder("av1_cuvid"):
+            return False
+        try:
+            test_cmd = [
+                "ffmpeg", "-hide_banner", "-v", "error",
+                "-hwaccel", "cuda", "-hwaccel_output_format", "cuda",
+                "-c:v", "av1_cuvid",
+                "-ss", "0",
+                "-t", "0.1",
+                "-i", path,
+                "-f", "null", "-"
+            ]
+            r = subprocess.run(test_cmd, capture_output=True, text=True, timeout=10)
+            stderr = (r.stderr or "").lower()
+            if any(s in stderr for s in ["not found", "unknown decoder", "cannot load", "init failed", "device not present"]):
+                return False
+            return r.returncode == 0 or "error" not in stderr
+        except Exception:
+            return False
+
     # AV1: Prefer HW decode only if actually supported; otherwise libdav1d
     if in_codec == "av1":
-        if actual_encoder.endswith("_nvenc") and can_cuda_decode(input_path):
-            init_hw_flags = ["-hwaccel", "cuda"] + init_hw_flags
-            _publish(self.request.id, {"type": "log", "message": "Decoder: using cuda (AV1)"})
+        if actual_encoder.endswith("_nvenc"):
+            used_cuda = False
+            # Be more aggressive when force_hw_decode is enabled
+            if force_hw_decode and can_av1_cuvid_decode(input_path):
+                init_hw_flags = ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"] + init_hw_flags
+                input_opts += ["-c:v", "av1_cuvid"]
+                _publish(self.request.id, {"type": "log", "message": "Decoder: using av1_cuvid (CUDA)"})
+                used_cuda = True
+            elif can_cuda_decode(input_path):
+                init_hw_flags = ["-hwaccel", "cuda"] + init_hw_flags
+                _publish(self.request.id, {"type": "log", "message": "Decoder: using cuda (AV1)"})
+                used_cuda = True
+
+            if not used_cuda:
+                input_opts += ["-c:v", "libdav1d"]
+                _publish(self.request.id, {"type": "log", "message": "Decoder: using libdav1d for AV1 input"})
         else:
+            # Non-NVIDIA encoders: keep software AV1 decode for now
             input_opts += ["-c:v", "libdav1d"]
             _publish(self.request.id, {"type": "log", "message": "Decoder: using libdav1d for AV1 input"})
     elif in_codec in ("h264", "hevc") and actual_encoder.endswith("_nvenc"):
