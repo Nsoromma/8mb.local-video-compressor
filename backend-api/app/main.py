@@ -525,6 +525,15 @@ async def get_available_codecs() -> AvailableCodecsResponse:
         for codec, is_enabled in codec_map.items():
             if is_enabled:
                 enabled_codecs.append(codec)
+
+        # Always include encoders the worker reports as available, regardless of settings
+        try:
+            avail_map = hw_info.get("available_encoders", {}) or {}
+            for enc in avail_map.values():
+                if enc not in enabled_codecs:
+                    enabled_codecs.append(enc)
+        except Exception:
+            pass
         
         return AvailableCodecsResponse(
             hardware_type=hw_info.get("type", "cpu"),
