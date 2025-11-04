@@ -515,32 +515,43 @@
   // Finalization watchdog: start/stop a short poller if we hit 100% but 'ready' hasn't arrived
   $: (async () => {
     const shouldPoll = !!taskId && displayedProgress >= 100 && !isReady && !doneStats && isCompressing;
+    console.log('[Watchdog] Reactive check - shouldPoll:', shouldPoll, 'displayedProgress:', displayedProgress, 'isReady:', isReady, 'isCompressing:', isCompressing);
     if (shouldPoll && !finalizePoller) {
       console.log('[Watchdog] Starting finalization poll for', taskId);
       finalizePoller = setInterval(async () => {
         if (!taskId) return;
         try {
-          // Check if file is ready by attempting download HEAD request
-          const dlRes = await fetch(`${downloadUrl(taskId)}?wait=0.5`, { method: 'HEAD', cache: 'no-store' });
-          if (dlRes.ok) {
+          console.log('[Watchdog] Polling download endpoint...');
+          // Try GET request with short wait instead of HEAD (more reliable)
+          const dlRes = await fetch(`${downloadUrl(taskId)}?wait=1`, { 
+            method: 'GET',
+            cache: 'no-store',
+            redirect: 'manual' // Don't follow redirects, just check response
+          });
+          console.log('[Watchdog] Response status:', dlRes.status, 'ok:', dlRes.ok);
+          
+          if (dlRes.ok && dlRes.status === 200) {
             console.log('[Watchdog] File ready! Auto-downloading...');
             isReady = true;
             isFinalizing = false;
             showTryDownload = false;
-            isCompressing = false; // Stop showing "compressing" state
+            isCompressing = false;
             clearInterval(finalizePoller);
             finalizePoller = null;
-            // Always trigger download immediately when file is ready
+            // Trigger download by navigating to URL
             window.location.href = downloadUrl(taskId!);
+          } else if (dlRes.status === 404) {
+            const body = await dlRes.json().catch(() => ({}));
+            console.log('[Watchdog] File not ready yet (404):', body.detail?.state || 'unknown state');
           } else {
-            console.log('[Watchdog] File not ready yet, will retry...');
+            console.log('[Watchdog] Unexpected status, will retry...');
           }
         } catch (e) {
           console.log('[Watchdog] Poll error:', e);
         }
-      }, 1000); // Poll every 1 second for faster response
+      }, 1000);
     } else if (!shouldPoll && finalizePoller) {
-      console.log('[Watchdog] Stopping finalization poll');
+      console.log('[Watchdog] Stopping finalization poll (shouldPoll=false)');
       clearInterval(finalizePoller);
       finalizePoller = null;
     }
