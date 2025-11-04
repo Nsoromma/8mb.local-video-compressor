@@ -5,6 +5,7 @@ import shlex
 import subprocess
 import time
 import logging
+import sys
 from pathlib import Path
 from typing import Dict
 from redis import Redis
@@ -14,6 +15,13 @@ from .utils import ffprobe_info, calc_bitrates
 from .hw_detect import get_hw_info, map_codec_to_hw
 from .startup_tests import run_startup_tests
 
+# Configure logging BEFORE any tests run
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    stream=sys.stdout,
+    force=True  # Override any existing config
+)
 logger = logging.getLogger(__name__)
 
 REDIS = None
@@ -27,18 +35,21 @@ try:
     logger.info("  8MB.LOCAL WORKER INITIALIZATION")
     logger.info("*" * 70)
     logger.info("")
+    sys.stdout.flush()  # Force flush to ensure logs appear
     _hw_info = get_hw_info()
     ENCODER_TEST_CACHE = run_startup_tests(_hw_info)
     logger.info(f"✓ Encoder cache ready: {len(ENCODER_TEST_CACHE)} encoder(s) validated")
     logger.info(f"✓ Worker initialization complete")
     logger.info("*" * 70)
     logger.info("")
+    sys.stdout.flush()  # Force flush
 except Exception as e:
     logger.error("")
     logger.error("*" * 70)
     logger.error(f"✗ STARTUP ERROR: Encoder tests failed: {e}")
     logger.error("*" * 70)
     logger.error("")
+    sys.stdout.flush()  # Force flush
     # Continue anyway; tests will run on-demand if cache is empty
 
 def _redis() -> Redis:
@@ -507,6 +518,10 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
         msg = f"ffmpeg failed with code {rc}\nLast stderr output:\n{recent_stderr}"
         _publish(self.request.id, {"type": "error", "message": msg})
         raise RuntimeError(msg)
+
+    # Send progress update BEFORE doing slow finalization work
+    _publish(self.request.id, {"type": "progress", "progress": 100.0})
+    _publish(self.request.id, {"type": "log", "message": "Finalizing: calculating file size and saving metadata..."})
 
     # Success: compute final stats
     try:

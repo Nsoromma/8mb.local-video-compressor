@@ -4,6 +4,7 @@ Populates ENCODER_TEST_CACHE so compress jobs don't pay the init test cost.
 """
 import os
 import subprocess
+import sys
 import logging
 from typing import Dict, List, Tuple
 
@@ -81,6 +82,7 @@ def run_startup_tests(hw_info: Dict) -> Dict[str, bool]:
     logger.info("║" + " " * 16 + "ENCODER VALIDATION TESTS" + " " * 28 + "║")
     logger.info("╚" + "═" * 68 + "╝")
     logger.info("")
+    sys.stdout.flush()  # Force output to appear in docker logs
     
     hw_type = hw_info.get('type', 'unknown').upper()
     hw_device = hw_info.get('device', 'N/A')
@@ -88,6 +90,7 @@ def run_startup_tests(hw_info: Dict) -> Dict[str, bool]:
     logger.info(f"  Hardware Device: {hw_device}")
     logger.info("")
     logger.info("─" * 70)
+    sys.stdout.flush()
     
     cache: Dict[str, bool] = {}
     test_results = []  # Track for summary table
@@ -140,9 +143,12 @@ def run_startup_tests(hw_info: Dict) -> Dict[str, bool]:
                 logger.error(f"  [{codec:15s}] ✗ FAIL - {actual_encoder}: {message}")
                 test_results.append((codec, actual_encoder, "FAIL", message))
             
+            sys.stdout.flush()  # Flush after each test result
+            
         except Exception as e:
             logger.error(f"  [{codec:15s}] ✗ ERROR - Exception: {str(e)}")
             test_results.append((codec, "unknown", "ERROR", str(e)))
+            sys.stdout.flush()
     
     # Summary section
     logger.info("")
@@ -164,6 +170,7 @@ def run_startup_tests(hw_info: Dict) -> Dict[str, bool]:
     
     logger.info("─" * 70)
     logger.info("")
+    sys.stdout.flush()
     
     # Store results in Redis for backend access (30-day expiry)
     try:

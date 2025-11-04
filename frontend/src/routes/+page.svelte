@@ -39,16 +39,24 @@
   $: warnText = estimated && estimated.video_kbps < 100 ? `Warning: Very low video bitrate (${Math.round(estimated.video_kbps)} kbps)` : null;
   
   // Auto-analyze when target size or audio bitrate changes (if file exists and was already analyzed)
-  $: if (file && jobInfo && (targetMB || audioKbps)) {
-    // Trigger re-analysis on these settings changes
-    const shouldReanalyze = uploadedFileName === file.name;
-    if (shouldReanalyze) {
+  // Track last values to avoid infinite loops
+  let lastAutoAnalyzeTarget = targetMB;
+  let lastAutoAnalyzeAudio = audioKbps;
+  
+  $: {
+    // Only trigger if the values actually changed AND file was already uploaded
+    const targetChanged = targetMB !== lastAutoAnalyzeTarget;
+    const audioChanged = audioKbps !== lastAutoAnalyzeAudio;
+    
+    if ((targetChanged || audioChanged) && file && uploadedFileName === file.name && jobInfo) {
       // Debounce: clear existing timer and set new one
       if (typeof window !== 'undefined') {
         clearTimeout((window as any).__analyzeTimer);
         (window as any).__analyzeTimer = setTimeout(() => {
           if (file && !isUploading && !isAnalyzing) {
             console.log('Settings changed, re-analyzing...');
+            lastAutoAnalyzeTarget = targetMB;
+            lastAutoAnalyzeAudio = audioKbps;
             uploadedFileName = null; // Force re-upload
             doUpload();
           }
