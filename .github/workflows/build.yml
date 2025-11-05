@@ -18,7 +18,7 @@ jobs:
           - flavor: latest
             cuda: "12.8.0"
             ffmpeg: "7.0"
-            nvcodec: "sdk/12.3"
+            nvcodec: "sdk/12.2"
             drivermin: "550.00"
             tagsuffix: latest
           - flavor: legacy
