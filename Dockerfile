@@ -25,8 +25,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 WORKDIR /build
 
 # NVIDIA NVENC headers (parameterized)
-RUN git clone https://git.videolan.org/git/ffmpeg/nv-codec-headers.git && \
-    cd nv-codec-headers && git checkout ${NV_CODEC_HEADERS_REF} && make install && cd ..
+RUN git clone --depth=1 https://github.com/FFmpeg/nv-codec-headers.git && \
+    cd nv-codec-headers && (git checkout ${NV_CODEC_HEADERS_REF} || echo "Ref ${NV_CODEC_HEADERS_REF} not found, using default HEAD") && make install && cd ..
 
 # Build FFmpeg with all hardware acceleration support
 RUN wget -q https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz && \
