@@ -4,13 +4,12 @@
 
 > Note (Nov 2025): CUDA/Driver compatibility updated
 >
-> The container now uses CUDA 12.2 (build + runtime) to support RTX 50‑series GPUs (e.g., 5070 Ti) while staying compatible with servers on NVIDIA driver 535.x.
+> We now publish two Docker tags to support both new and legacy NVIDIA environments from the same codebase.
 >
-> - Build: `nvidia/cuda:12.2.0-devel-ubuntu22.04`
-> - Runtime: `nvidia/cuda:12.2.0-runtime-ubuntu22.04`
-> - NVENC headers: `sdk/12.1` (maximizes compatibility with driver 535.x)
+> - `:latest` (Blackwell / 50‑series): CUDA 12.8 + FFmpeg 7, NVENC headers sdk/12.3. Minimum driver: 550.00
+> - `:legacy` (Turing/Ampere on 535.x): CUDA 12.2 + FFmpeg 6.1.1, NVENC headers sdk/12.1. Minimum driver: 535.54.03
 >
-> Minimum Linux driver: 535.54.03. This resolves `cuInit(0)` / `CUDA_ERROR_NOT_FOUND` seen with older CUDA 11.8 base images on 50‑series GPUs.
+> The image auto-detects your NVIDIA driver at startup and prints a clear warning if the tag doesn't match your host. CPU/VAAPI still work; NVENC will be disabled if incompatible.
 
 ## Table of Contents
 * [Features](#features)
@@ -253,14 +252,34 @@ The system validates encoder availability at runtime and automatically falls bac
 
 The easiest way to run 8mb.local is with the pre-built Docker image. Choose the command for your system:
 
+### Which tag should I use?
+
+- Use `jms1717/8mblocal:latest` if you have a newer GPU/driver (e.g., RTX 50‑series; driver 550+).
+- Use `jms1717/8mblocal:legacy` if your system is on driver 535.x (common on Debian 12 servers) or older GPUs.
+
+Check your driver:
+
+```bash
+nvidia-smi | head -n1  # Look for Driver Version: X.YY
+```
+
+- If Driver >= 550.00 → use `:latest`
+- If Driver >= 535.54.03 and < 550 → use `:legacy`
+
+If you run the wrong tag, the container will warn on startup with guidance to switch tags.
+
 #### CPU Only (No GPU)
 ```bash
 docker run -d --name 8mblocal -p 8001:8001 -v ./uploads:/app/uploads -v ./outputs:/app/outputs jms1717/8mblocal:latest
 ```
 
-#### NVIDIA GPU (NVENC)
+#### NVIDIA GPU (NVENC) — latest (driver 550+)
 ```bash
 docker run -d --name 8mblocal --gpus all -e NVIDIA_DRIVER_CAPABILITIES=compute,video,utility -p 8001:8001 -v ./uploads:/app/uploads -v ./outputs:/app/outputs jms1717/8mblocal:latest
+```
+#### NVIDIA GPU (NVENC) — legacy (driver 535.x)
+```bash
+docker run -d --name 8mblocal --gpus all -e NVIDIA_DRIVER_CAPABILITIES=compute,video,utility -p 8001:8001 -v ./uploads:/app/uploads -v ./outputs:/app/outputs jms1717/8mblocal:legacy
 ```
 > **Note**: The `-e NVIDIA_DRIVER_CAPABILITIES=compute,video,utility` environment variable is **required** to enable NVENC support. It tells the NVIDIA Container Toolkit to mount video encoding libraries into the container.
 
@@ -295,11 +314,35 @@ services:
     restart: unless-stopped
 ```
 
-#### NVIDIA GPU
+#### NVIDIA GPU — latest (driver 550+)
 ```yaml
 services:
   8mblocal:
     image: jms1717/8mblocal:latest
+    container_name: 8mblocal
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./uploads:/app/uploads
+      - ./outputs:/app/outputs
+      - ./.env:/app/.env  # Optional: for custom settings
+    restart: unless-stopped
+    environment:
+      - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility  # Required for NVENC
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+```
+
+#### NVIDIA GPU — legacy (driver 535.x)
+```yaml
+services:
+  8mblocal:
+    image: jms1717/8mblocal:legacy
     container_name: 8mblocal
     ports:
       - "8001:8001"
@@ -549,15 +592,14 @@ docker compose up -d
     ```
   - This tells the NVIDIA Container Toolkit to mount NVENC libraries into the container
   
-  - **Critical: Driver Version Mismatch** - A common cause of NVENC failures:
-    - **Error symptom**: `Driver does not support the required nvenc API version. Required: 12.1 Found: X`
-    - **Root cause**: Your NVIDIA driver is older than the NVENC API level used by the container (12.1)
-    - **Who's affected**: Systems running NVIDIA drivers older than **535.54.03** (e.g., some Debian 12 stock repos)
-    - **Quick check**: Run `nvidia-smi` and look at driver version:
-      - Driver **535.54.03+** = NVENC API 12.1 ✅ (compatible)
-      - Driver **550.x or newer** = Newer API (also compatible)
+  - **Critical: Driver/Tag Mismatch**
+    - **Symptom**: `cuInit(0)` / `CUDA_ERROR_NOT_FOUND` on RTX 50‑series with old image; or NVENC API mismatch on 535.x with latest image
+    - **Fix**: Use the correct tag for your driver:
+      - Driver >= 550 → use `:latest`
+      - 535.54.03 ≤ Driver < 550 → use `:legacy`
+    - The container prints a startup warning if it detects a mismatch.
     
-  - **Solution: Upgrade NVIDIA Driver (to at least 535.54.03)**
+  - **Solution: Upgrade NVIDIA Driver (optional)**
     
     For **Debian 12** systems:
     ```bash
@@ -574,19 +616,20 @@ docker compose up -d
     # Add NVIDIA PPA for latest drivers
     sudo add-apt-repository ppa:graphics-drivers/ppa
     sudo apt update
-  sudo apt install nvidia-driver-535  # or newer (550+ also fine)
+  sudo apt install nvidia-driver-535  # legacy tag works (550+ for latest)
     sudo reboot
     ```
     
     After reboot, verify: `nvidia-smi` should show driver 550+ and `ffmpeg -encoders | grep nvenc` inside container should work.
     
-  - **Why this happens**: This container is built against NVENC SDK/API **12.1** for broad compatibility. Drivers older than 535.x expose a lower API level and cannot satisfy 12.1.
+  - **Why this happens**: The `:legacy` image targets NVENC SDK **12.1** (min driver 535.54.03). The `:latest` image targets newer CUDA/NVENC for Blackwell (min driver 550).
   
   - **Verification steps**:
     1. Check host driver: `nvidia-smi` (look for version 550+)
   2. Test NVENC in container: `docker exec 8mblocal ffmpeg -f lavfi -i nullsrc -c:v h264_nvenc -f null -`
   3. If you see "Cannot load libnvidia-encode.so.1", add the `NVIDIA_DRIVER_CAPABILITIES` env var above
-  4. If you see "Required: 12.1 Found: X", upgrade your driver to 535.54.03 or newer
+  4. If on `:legacy` you see "Required: 12.1 Found: X", upgrade driver to 535.54.03+ or switch to CPU/VAAPI
+  5. If on `:latest` you see CUDA init failures on older drivers, switch to `:legacy`
   
   - On Linux: Verify [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) is installed
   - **If driver upgrade not possible**: System will automatically fallback to CPU encoding

@@ -1,5 +1,8 @@
 services:
   8mblocal:
+    # Choose the image tag for your driver:
+    # - latest (driver >= 550): jms1717/8mblocal:latest
+    # - legacy (535.x drivers): jms1717/8mblocal:legacy
     image: jms1717/8mblocal:latest
     container_name: 8mblocal
     ports:
