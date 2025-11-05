@@ -6,12 +6,14 @@ ARG FFMPEG_VERSION=7.0
 ARG NV_CODEC_HEADERS_REF=sdk/12.2
 ARG BUILD_FLAVOR=latest
 ARG DRIVER_MIN=550.00
+ARG NV_CODEC_COMPAT=12.0
 
 # Stage 1: Build FFmpeg with multi-vendor GPU support (NVIDIA NVENC, Intel QSV, AMD VAAPI)
 # CUDA is parameterized to support both legacy and latest builds
 FROM nvidia/cuda:${CUDA_VERSION}-devel-${UBUNTU_FLAVOR} AS ffmpeg-build
 ARG FFMPEG_VERSION
 ARG NV_CODEC_HEADERS_REF
+ARG NV_CODEC_COMPAT
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -24,9 +26,16 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 WORKDIR /build
 
-# NVIDIA NVENC headers (parameterized)
+# NVIDIA NVENC headers (parameterized with compatibility override)
+# For FFmpeg 6.x: Force SDK to report 12.0 API even when using 12.2 headers
 RUN git clone --depth=1 https://github.com/FFmpeg/nv-codec-headers.git && \
-    cd nv-codec-headers && (git checkout ${NV_CODEC_HEADERS_REF} || echo "Ref ${NV_CODEC_HEADERS_REF} not found, using default HEAD") && make install && cd ..
+    cd nv-codec-headers && \
+    (git checkout ${NV_CODEC_HEADERS_REF} || echo "Ref ${NV_CODEC_HEADERS_REF} not found, using default HEAD") && \
+    if [ "${NV_CODEC_COMPAT}" = "12.0" ]; then \
+        echo "Patching NVENC SDK to report 12.0 API for FFmpeg 6.x compatibility..." && \
+        sed -i 's/^#define NVENCAPI_VERSION.*/#define NVENCAPI_VERSION ((12 << 4) | 0)/' include/ffnvcodec/nvEncodeAPI.h; \
+    fi && \
+    make install && cd ..
 
 # Ensure pkg-config can find ffnvcodec (nv-codec-headers installs ffnvcodec.pc under /usr/local/lib/pkgconfig)
 ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH
@@ -104,9 +113,9 @@ COPY --from=ffmpeg-build /usr/local/lib/libavfilter.so* /usr/local/lib/
 COPY --from=ffmpeg-build /usr/local/lib/libswscale.so* /usr/local/lib/
 COPY --from=ffmpeg-build /usr/local/lib/libswresample.so* /usr/local/lib/
 COPY --from=ffmpeg-build /usr/local/lib/libavdevice.so* /usr/local/lib/
-# Copy CUDA runtime libs required by NVENC (base image has libcuda.so but not these)
-COPY --from=ffmpeg-build /usr/local/cuda/lib64/libcudart.so* /usr/local/cuda/lib64/
-COPY --from=ffmpeg-build /usr/local/cuda/lib64/libnpp*.so* /usr/local/cuda/lib64/
+# CRITICAL: Do NOT copy CUDA libs from devel stage - they are stubs!
+# The cuda:*-base-* runtime image already contains the correct CUDA runtime libraries
+# at /usr/local/cuda/lib64 and LD_LIBRARY_PATH is pre-configured to find them.
 RUN ldconfig
 
 WORKDIR /app

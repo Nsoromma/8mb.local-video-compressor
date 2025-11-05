@@ -418,10 +418,59 @@ git clone https://github.com/JMS1717/8mb.local.git
 cd 8mb.local
 ```
 
-2. Build and run:
+2. Build the image with appropriate arguments:
+
+**For latest (CUDA 12.8, FFmpeg 7, driver 550+):**
 ```bash
-docker build -t 8mblocal:local .
-docker run -d --name 8mblocal -p 8001:8001 -v ./uploads:/app/uploads -v ./outputs:/app/outputs 8mblocal:local
+docker build \
+  --build-arg BUILD_VERSION=134 \
+  --build-arg BUILD_FLAVOR=latest \
+  --build-arg CUDA_VERSION=12.8.0 \
+  --build-arg UBUNTU_FLAVOR=ubuntu22.04 \
+  --build-arg FFMPEG_VERSION=7.0 \
+  --build-arg NV_CODEC_HEADERS_REF=sdk/12.2 \
+  --build-arg NV_CODEC_COMPAT=12.2 \
+  --build-arg DRIVER_MIN=550.00 \
+  -t jms1717/8mblocal:latest .
+```
+
+**For legacy (CUDA 12.2, FFmpeg 6.1.1, driver 535+):**
+```bash
+docker build \
+  --build-arg BUILD_VERSION=134 \
+  --build-arg BUILD_FLAVOR=legacy \
+  --build-arg CUDA_VERSION=12.2.0 \
+  --build-arg UBUNTU_FLAVOR=ubuntu22.04 \
+  --build-arg FFMPEG_VERSION=6.1.1 \
+  --build-arg NV_CODEC_HEADERS_REF=sdk/12.2 \
+  --build-arg NV_CODEC_COMPAT=12.0 \
+  --build-arg DRIVER_MIN=535.54.03 \
+  -t jms1717/8mblocal:legacy .
+```
+
+**Build Arguments Explained:**
+- `BUILD_VERSION`: Image version number (increment for each build)
+- `BUILD_FLAVOR`: `latest` or `legacy` (display label)
+- `CUDA_VERSION`: NVIDIA CUDA toolkit version (12.8.0 for RTX 50/40-series, 12.2.0 for legacy)
+- `UBUNTU_FLAVOR`: Base OS version (ubuntu22.04 recommended)
+- `FFMPEG_VERSION`: FFmpeg version (7.0 for latest features, 6.1.1 for legacy compatibility)
+- `NV_CODEC_HEADERS_REF`: NVENC headers git branch/tag from [nv-codec-headers](https://github.com/FFmpeg/nv-codec-headers)
+- `NV_CODEC_COMPAT`: API version override for FFmpeg compatibility (12.2 for FFmpeg 7.x, 12.0 for FFmpeg 6.x)
+- `DRIVER_MIN`: Minimum NVIDIA driver version required
+
+**Why two build variants?**
+- **FFmpeg 6.1.1 is incompatible with NVENC SDK 12.1+** due to removed API fields (`pixelBitDepthMinus8`, `NV_ENC_BUFFER_FORMAT_*_PL`)
+- Legacy builds use `NV_CODEC_COMPAT=12.0` to force FFmpeg 6.x to compile against SDK 12.2 headers using the 12.0 API subset
+- Latest builds use FFmpeg 7.0 which is fully compatible with SDK 12.2+
+
+3. Run:
+```bash
+docker run -d --name 8mblocal -p 8001:8001 \
+  --gpus all \
+  -e NVIDIA_DRIVER_CAPABILITIES=compute,video,utility \
+  -v ./uploads:/app/uploads \
+  -v ./outputs:/app/outputs \
+  jms1717/8mblocal:latest
 ```
 
 Or with Docker Compose:
