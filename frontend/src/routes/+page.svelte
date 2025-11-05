@@ -713,7 +713,9 @@
 
   // Finalization watchdog: start/stop a short poller if we hit 100% but 'ready' hasn't arrived
   $: (async () => {
-    const shouldPoll = !!taskId && displayedProgress >= 100 && !isReady && !doneStats && isCompressing;
+    // CRITICAL: Only trigger watchdog at EXACTLY 100%, not at high progress like 98%
+    // This prevents "zombie stream" bug where client resets while server still encoding
+    const shouldPoll = !!taskId && displayedProgress >= 99.9 && !isReady && !doneStats && isCompressing;
     console.log('[Watchdog] Reactive check - shouldPoll:', shouldPoll, 'displayedProgress:', displayedProgress, 'isReady:', isReady, 'isCompressing:', isCompressing);
     if (shouldPoll && !finalizePoller) {
       console.log('[Watchdog] Starting finalization poll for', taskId);

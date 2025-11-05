@@ -141,13 +141,15 @@ def is_encoder_available(encoder_name: str) -> bool:
             text=True,
             timeout=2
         )
-        # Look for exact encoder match with word boundaries
-        # Format is like: " V..... h264_nvenc" or " V....D h264_nvenc"
+        # Look for exact encoder match
+        # Format is like: " V..... h264_nvenc           Nvidia NVENC H.264 encoder"
+        # After split: ['V.....', 'h264_nvenc', 'Nvidia', 'NVENC', 'H.264', 'encoder']
         for line in result.stdout.split('\n'):
             if encoder_name in line:
-                # Verify it's the actual encoder name, not just contained in description
-                parts = line.split()
-                if len(parts) >= 2 and parts[1] == encoder_name:
+                # Split and find encoder name - it should be column index 1 (after flags)
+                parts = [p for p in line.split() if p]  # Filter empty strings
+                # Check if encoder name appears as standalone word
+                if encoder_name in parts:
                     return True
         return False
     except Exception as e:
