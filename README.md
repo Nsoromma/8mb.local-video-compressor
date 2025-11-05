@@ -2,6 +2,15 @@
 
 8mb.local is a self‑hosted, fire‑and‑forget video compressor. Drop a file, choose a target size (e.g., 8MB, 25MB, 50MB, 100MB), and let GPU-accelerated encoding produce compact outputs with AV1/HEVC/H.264. Supports **NVIDIA NVENC**, **Intel/AMD VAAPI** (Linux), and **CPU fallback**. The stack includes a SvelteKit UI, FastAPI backend, Celery worker, Redis broker, and real‑time progress via Server‑Sent Events (SSE).
 
+## Table of Contents
+* [Features](#features)
+* [Architecture](#architecture-technical-deep-dive)
+* [Installation](#installation)
+* [Usage](#using-the-app)
+* [Configuration](#configuration)
+* [Reverse Proxy Configuration](#reverse-proxy-configuration)
+* [Troubleshooting](#troubleshooting)
+
 ## Screenshots
 
 <br/>
