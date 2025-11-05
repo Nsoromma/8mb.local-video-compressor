@@ -180,6 +180,12 @@ def run_startup_tests(hw_info: Dict) -> Dict[str, bool]:
     """
     from .hw_detect import map_codec_to_hw
     
+    # DEBUG: Log GPU environment variables
+    logger.info("🔍 GPU Environment Check:")
+    logger.info(f"  NVIDIA_VISIBLE_DEVICES: {os.environ.get('NVIDIA_VISIBLE_DEVICES', 'NOT SET')}")
+    logger.info(f"  NVIDIA_DRIVER_CAPABILITIES: {os.environ.get('NVIDIA_DRIVER_CAPABILITIES', 'NOT SET')}")
+    logger.info("")
+    
     logger.info("")
     logger.info("╔" + "═" * 68 + "╗")
     logger.info("║" + " " * 16 + "ENCODER VALIDATION TESTS" + " " * 28 + "║")
