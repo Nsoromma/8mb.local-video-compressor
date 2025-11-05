@@ -14,6 +14,7 @@ from .celery_app import celery_app
 from .utils import ffprobe_info, calc_bitrates
 from .hw_detect import get_hw_info, map_codec_to_hw
 from .startup_tests import run_startup_tests
+from threading import Thread
 
 # Configure logging BEFORE any tests run
 logging.basicConfig(
@@ -28,29 +29,38 @@ REDIS = None
 # Cache encoder test results to avoid slow init tests on every job
 ENCODER_TEST_CACHE: Dict[str, bool] = {}
 
-# Run startup tests once on module load
-try:
-    logger.info("")
-    logger.info("*" * 70)
-    logger.info("  8MB.LOCAL WORKER INITIALIZATION")
-    logger.info("*" * 70)
-    logger.info("")
-    sys.stdout.flush()  # Force flush to ensure logs appear
-    _hw_info = get_hw_info()
-    ENCODER_TEST_CACHE = run_startup_tests(_hw_info)
-    logger.info(f"✓ Encoder cache ready: {len(ENCODER_TEST_CACHE)} encoder(s) validated")
-    logger.info(f"✓ Worker initialization complete")
-    logger.info("*" * 70)
-    logger.info("")
-    sys.stdout.flush()  # Force flush
-except Exception as e:
-    logger.error("")
-    logger.error("*" * 70)
-    logger.error(f"✗ STARTUP ERROR: Encoder tests failed: {e}")
-    logger.error("*" * 70)
-    logger.error("")
-    sys.stdout.flush()  # Force flush
-    # Continue anyway; tests will run on-demand if cache is empty
+def _start_encoder_tests_async():
+    def _run():
+        try:
+            logger.info("")
+            logger.info("*" * 70)
+            logger.info("  8MB.LOCAL WORKER INITIALIZATION")
+            logger.info("*" * 70)
+            logger.info("")
+            sys.stdout.flush()
+            _hw_info = get_hw_info()
+            cache = run_startup_tests(_hw_info)
+            ENCODER_TEST_CACHE.update(cache)
+            logger.info(f"✓ Encoder cache ready: {len(ENCODER_TEST_CACHE)} encoder(s) validated")
+            logger.info(f"✓ Worker initialization complete")
+            logger.info("*" * 70)
+            logger.info("")
+            sys.stdout.flush()
+        except Exception as e:
+            logger.warning(f"Startup encoder tests failed (non-fatal): {e}")
+            sys.stdout.flush()
+
+    # Allow disabling tests entirely via env
+    if os.getenv('DISABLE_STARTUP_TESTS', '').lower() in ('1','true','yes'):
+        logger.info("Skipping encoder startup tests (DISABLE_STARTUP_TESTS=1)")
+        return
+    try:
+        Thread(target=_run, daemon=True).start()
+    except Exception as e:
+        logger.warning(f"Failed to start background encoder tests: {e}")
+
+
+_start_encoder_tests_async()
 
 def _redis() -> Redis:
     global REDIS

@@ -108,6 +108,18 @@ def get_history(limit: Optional[int] = None) -> List[Dict]:
     return history
 
 
+def get_history_entry(task_id: str) -> Optional[Dict]:
+    """Get a specific history entry by task_id, or None if not found."""
+    try:
+        history = _read_history()
+        for entry in history:
+            if entry.get('task_id') == task_id:
+                return entry
+    except Exception:
+        pass
+    return None
+
+
 def clear_history():
     """Clear all history"""
     _write_history([])

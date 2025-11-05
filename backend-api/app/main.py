@@ -344,6 +344,11 @@ async def compress(req: CompressRequest):
             fast_mp4_finalize=bool(req.fast_mp4_finalize or False),
         ),
     )
+    # Proactively publish a queued message so UI shows activity even if worker startup is delayed
+    try:
+        await redis.publish(f"progress:{task.id}", orjson.dumps({"type":"log","message":"Job queued – waiting for worker…"}).decode())
+    except Exception:
+        pass
     return {"task_id": task.id}
 
 
@@ -403,6 +408,43 @@ async def download(task_id: str, wait: float | None = None):
         filename = os.path.basename(path)
         media_type = "video/mp4" if filename.lower().endswith(".mp4") else "video/x-matroska"
         return FileResponse(path, filename=filename, media_type=media_type)
+
+    # History-based fallback: reconstruct expected output path from saved history
+    # This enables downloads from the History page even after Celery metadata expires.
+    try:
+        entry = history_manager.get_history_entry(task_id)  # type: ignore[attr-defined]
+    except AttributeError:
+        # Older module without helper: scan limited history list
+        entry = None
+        try:
+            for e in history_manager.get_history(limit=200):
+                if e.get("task_id") == task_id:
+                    entry = e
+                    break
+        except Exception:
+            entry = None
+    except Exception:
+        entry = None
+
+    if entry:
+        try:
+            uploaded_name = entry.get("filename") or ""
+            # Derive output extension from stored container (default mp4)
+            container = (entry.get("container") or "mp4").lower()
+            ext = ".mp4" if container == "mp4" else ".mkv"
+            # Reconstruct output filename like in /api/compress
+            stem = Path(uploaded_name).stem
+            if len(stem) > 37 and len(stem) >= 37 and stem[36] == '_':
+                stem = stem[37:]
+            output_name = stem + "_8mblocal" + ext
+            candidate = OUTPUTS_DIR / output_name
+            if candidate.is_file():
+                filename = os.path.basename(candidate)
+                media_type = "video/mp4" if filename.lower().endswith(".mp4") else "video/x-matroska"
+                return FileResponse(str(candidate), filename=filename, media_type=media_type)
+        except Exception:
+            # Ignore and fall through to 404 detail
+            pass
 
     # Otherwise, return a more descriptive error payload
     detail = {

@@ -85,6 +85,10 @@
 		return String(v);
 	}
 
+	function downloadUrl(taskId: string): string {
+		return `/api/jobs/${encodeURIComponent(taskId)}/download`;
+	}
+
 	onMount(fetchHistory);
 </script>
 
@@ -206,9 +210,12 @@
 						{/if}
 					</div>
 
-					<button class="btn-delete" on:click={() => deleteEntry(entry.task_id)}>
-						🗑️ Delete
-					</button>
+					<div class="entry-actions">
+						<a class="btn-secondary" href={downloadUrl(entry.task_id)} target="_blank" rel="noopener">⬇️ Download</a>
+						<button class="btn-delete" on:click={() => deleteEntry(entry.task_id)}>
+							🗑️ Delete
+						</button>
+					</div>
 				</div>
 			{/each}
 		</div>
@@ -272,6 +279,12 @@
 
 	.btn-danger:hover {
 		background-color: #dc2626;
+	}
+
+	.entry-actions {
+		display: flex;
+		gap: 0.5rem;
+		align-items: center;
 	}
 
 	.btn-delete {

@@ -42,7 +42,7 @@
   // Track last values to avoid infinite loops
   let autoAnalyzeEnabled = true;
   let lastAutoAnalyzeTarget = targetMB;
-  let lastAutoAnalyzeAudio = audioKbps;
+  let lastAutoAnalyzeAudio: 64|96|128|160|192|256 = audioKbps;
   
   $: {
     if (!autoAnalyzeEnabled) {
@@ -954,7 +954,10 @@
         {#each history as item}
           <li class="flex items-center justify-between gap-2">
             <span class="truncate">{item.filename}</span>
-            <span class="opacity-70">{item.compressed_size_mb.toFixed(2)} MB</span>
+            <div class="flex items-center gap-3">
+              <span class="opacity-70">{item.compressed_size_mb.toFixed(2)} MB</span>
+              <a class="text-blue-400 underline" href={`/api/jobs/${encodeURIComponent(item.task_id)}/download`} title="Download">⬇️</a>
+            </div>
           </li>
         {/each}
       </ul>
