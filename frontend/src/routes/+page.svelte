@@ -21,8 +21,8 @@
   let tune: 'hq'|'ll'|'ull'|'lossless' = 'hq';
   // Decoder preference
   let preferHwDecode: boolean = true; // Prefer hardware decoding when available
-  // MP4 finalize preference - DEFAULT TO TRUE for better UX
-  let fastMp4Finalize: boolean = true;
+  // MP4 finalize preference - disabled by default
+  let fastMp4Finalize: boolean = false;
   // New resolution and trim controls
   let maxWidth: number | null = null;
   let maxHeight: number | null = null;
@@ -1144,9 +1144,9 @@
             <span class="text-sm">🎚️ Auto audio bitrate</span>
           </label>
           {#if container === 'mp4'}
-          <label class="flex items-center gap-2 cursor-pointer" title="Fragmented MP4 eliminates the long 'finalizing' step (99%->100%). Works with all modern players and Discord. Recommended!">
+          <label class="flex items-center gap-2 cursor-pointer" title="Fragmented MP4 eliminates the long 'finalizing' step (99%->100%). Works with all modern players and Discord.">
             <input type="checkbox" bind:checked={fastMp4Finalize} class="w-4 h-4" />
-            <span class="text-sm">🚀 Fast finalize (recommended)</span>
+            <span class="text-sm">🚀 Fast finalize (fragmented MP4)</span>
           </label>
           {/if}
           <label class="flex items-center gap-2 cursor-pointer" title="When enabled, the decoder will try to use GPU hardware decoding whenever possible.">
