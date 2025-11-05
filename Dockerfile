@@ -26,14 +26,15 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 WORKDIR /build
 
-# NVIDIA NVENC headers (parameterized with compatibility override)
-# For FFmpeg 6.x: Force SDK to report 12.0 API even when using 12.2 headers
+# NVIDIA NVENC headers
+# Use NV_CODEC_COMPAT for legacy builds (sdk/12.0 for FFmpeg 6.x, sdk/12.2+ for FFmpeg 7+)
 RUN git clone --depth=1 https://github.com/FFmpeg/nv-codec-headers.git && \
     cd nv-codec-headers && \
-    (git checkout ${NV_CODEC_HEADERS_REF} || echo "Ref ${NV_CODEC_HEADERS_REF} not found, using default HEAD") && \
-    if [ "${NV_CODEC_COMPAT}" = "12.0" ]; then \
-        echo "Patching NVENC SDK to report 12.0 API for FFmpeg 6.x compatibility..." && \
-        sed -i 's/^#define NVENCAPI_VERSION.*/#define NVENCAPI_VERSION ((12 << 4) | 0)/' include/ffnvcodec/nvEncodeAPI.h; \
+    if [ -n "${NV_CODEC_COMPAT}" ] && [ "${NV_CODEC_COMPAT}" != "${NV_CODEC_HEADERS_REF}" ]; then \
+        echo "Using ${NV_CODEC_COMPAT} headers for FFmpeg ${FFMPEG_VERSION} compatibility" && \
+        git checkout ${NV_CODEC_COMPAT} || echo "Warning: ${NV_CODEC_COMPAT} not found, using ${NV_CODEC_HEADERS_REF}"; \
+    else \
+        git checkout ${NV_CODEC_HEADERS_REF} || echo "Ref ${NV_CODEC_HEADERS_REF} not found, using default HEAD"; \
     fi && \
     make install && cd ..
 
@@ -113,9 +114,9 @@ COPY --from=ffmpeg-build /usr/local/lib/libavfilter.so* /usr/local/lib/
 COPY --from=ffmpeg-build /usr/local/lib/libswscale.so* /usr/local/lib/
 COPY --from=ffmpeg-build /usr/local/lib/libswresample.so* /usr/local/lib/
 COPY --from=ffmpeg-build /usr/local/lib/libavdevice.so* /usr/local/lib/
-# CRITICAL: Do NOT copy CUDA libs from devel stage - they are stubs!
-# The cuda:*-base-* runtime image already contains the correct CUDA runtime libraries
-# at /usr/local/cuda/lib64 and LD_LIBRARY_PATH is pre-configured to find them.
+# Copy NVIDIA Performance Primitives (NPP) libraries required by FFmpeg's --enable-libnpp
+# Note: cuda:*-base-* includes libcudart but NOT libnpp*, so we must copy from devel stage
+COPY --from=ffmpeg-build /usr/local/cuda/lib64/libnpp*.so* /usr/local/cuda/lib64/
 RUN ldconfig
 
 WORKDIR /app
