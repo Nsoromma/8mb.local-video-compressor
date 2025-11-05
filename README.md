@@ -12,15 +12,40 @@
 <summary>Screenshots (click to expand)</summary>
 
 <br/>
-
-![Advanced](docs/images/advanced.png)
-![Compressing](docs/images/compressing.png)
-![Encoder Tests](docs/images/encodertests.png)
-![GPU List](docs/images/gpulist.png)
-![History](docs/images/history.png)
-![Main](docs/images/main.png)
-![Queue](docs/images/queue.png)
-![Settings](docs/images/settings.png)
+<table>
+  <tr>
+    <td align="center"><b>Main Interface</b></td>
+    <td align="center"><b>Advanced Options</b></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/main.png" alt="Main Interface" width="100%"></td>
+    <td><img src="docs/images/advanced.png" alt="Advanced Options" width="100%"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Live Queue</b></td>
+    <td align="center"><b>Compressing (Real-time Logs)</b></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/queue.png" alt="Live Queue" width="100%"></td>
+    <td><img src="docs/images/compressing.png" alt="Compressing with real-time logs" width="100%"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Job History</b></td>
+    <td align="center"><b>Settings Panel</b></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/history.png" alt="Job History" width="100%"></td>
+    <td><img src="docs/images/settings.png" alt="Settings Panel" width="100%"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>GPU Support List</b></td>
+    <td align="center"><b>Encoder Validation Tests</b></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/gpulist.png" alt="GPU Support List" width="100%"></td>
+    <td><img src="docs/images/encodertests.png" alt="Encoder Validation Tests" width="100%"></td>
+  </tr>
+</table>
 
 </details>
 
