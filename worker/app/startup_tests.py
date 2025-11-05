@@ -133,7 +133,7 @@ def test_encoder_init(encoder_name: str, hw_flags: List[str]) -> Tuple[bool, str
 
 
 def is_encoder_available(encoder_name: str) -> bool:
-    """Check if encoder is available in ffmpeg."""
+    """Check if encoder is available in ffmpeg -encoders list."""
     try:
         result = subprocess.run(
             ["ffmpeg", "-hide_banner", "-encoders"],
@@ -141,8 +141,17 @@ def is_encoder_available(encoder_name: str) -> bool:
             text=True,
             timeout=2
         )
-        return encoder_name in result.stdout
-    except Exception:
+        # Look for exact encoder match with word boundaries
+        # Format is like: " V..... h264_nvenc" or " V....D h264_nvenc"
+        for line in result.stdout.split('\n'):
+            if encoder_name in line:
+                # Verify it's the actual encoder name, not just contained in description
+                parts = line.split()
+                if len(parts) >= 2 and parts[1] == encoder_name:
+                    return True
+        return False
+    except Exception as e:
+        logger.warning(f"Failed to check encoder availability: {e}")
         return False
 
 
@@ -222,6 +231,25 @@ def run_startup_tests(hw_info: Dict) -> Dict[str, bool]:
             # Check availability first (fast)
             if not is_encoder_available(actual_encoder):
                 logger.warning(f"  [{codec:15s}] ✗ UNAVAILABLE - Not in ffmpeg -encoders list")
+                # Log additional diagnostic info for hardware encoders
+                if actual_encoder.endswith(("_nvenc", "_qsv", "_amf", "_vaapi")):
+                    try:
+                        # Try running ffmpeg -encoders to see what's available
+                        enc_result = subprocess.run(
+                            ["ffmpeg", "-hide_banner", "-encoders"],
+                            capture_output=True,
+                            text=True,
+                            timeout=2
+                        )
+                        # Look for similar encoders
+                        similar = [line.strip() for line in enc_result.stdout.split('\n') 
+                                  if 'nvenc' in line.lower() or 'qsv' in line.lower() or 'vaapi' in line.lower()]
+                        if similar:
+                            logger.info(f"    Available hardware encoders: {', '.join(similar[:3])}")
+                        else:
+                            logger.warning(f"    No hardware encoders found in ffmpeg build")
+                    except Exception:
+                        pass
                 cache_key = f"{actual_encoder}:{':'.join(init_hw_flags)}"
                 cache[cache_key] = False
                 test_results[codec] = (actual_encoder, "UNAVAILABLE", None, "Not in ffmpeg -encoders")

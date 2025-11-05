@@ -573,9 +573,14 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
                             # Safety clamp
                             scaled_progress = min(max(scaled_progress, 0.0), encoding_portion)
                             
-                            # Skip reporting during confused early phase (first 3%)
-                            # This skips FFmpeg's analysis phase that can show misleading progress
-                            should_report = scaled_progress >= 0.03
+                            # Skip early confused phase where FFmpeg analysis reports misleading progress
+                            # Only start reporting after we have stable speed data and reasonable progress
+                            should_report = (
+                                scaled_progress >= 0.03 and  # Skip first 3%
+                                speed_ewma is not None and   # Have speed data
+                                len([x for x in [speed_ewma] if x and x > 0.1]) > 0 and  # Speed is meaningful
+                                elapsed > 2.0  # At least 2 seconds elapsed
+                            )
                             
                             if should_report:
                                 last_progress = scaled_progress
