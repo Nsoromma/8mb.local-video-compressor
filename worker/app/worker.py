@@ -531,7 +531,35 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
 
     # Send progress update BEFORE doing slow finalization work
     _publish(self.request.id, {"type": "progress", "progress": 100.0})
-    _publish(self.request.id, {"type": "log", "message": "Finalizing: calculating file size and saving metadata..."})
+    _publish(self.request.id, {"type": "log", "message": "Finalizing: verifying output file..."})
+
+    # CRITICAL: Wait for file to be fully written and readable (especially on networked/slow filesystems)
+    max_wait = 10  # seconds
+    file_ready = False
+    for attempt in range(max_wait * 5):  # Check every 200ms
+        try:
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                # Try to open the file to ensure it's not locked
+                with open(output_path, 'rb') as f:
+                    f.read(1)
+                file_ready = True
+                break
+        except (FileNotFoundError, IOError, OSError):
+            pass
+        time.sleep(0.2)
+    
+    if not file_ready:
+        msg = f"Output file not accessible after encode completion: {output_path}"
+        _publish(self.request.id, {"type": "error", "message": msg})
+        raise RuntimeError(msg)
+
+    # Success: compute final stats
+    try:
+        final_size = os.path.getsize(output_path)
+    except Exception:
+        final_size = 0
+    
+    _publish(self.request.id, {"type": "log", "message": f"Output verified: {final_size / (1024*1024):.2f} MB"})
 
     # Make the file downloadable immediately after encode finishes
     # Expose output_path early via task meta and send a 'ready' event for the UI
@@ -550,12 +578,6 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
         _publish(self.request.id, {"type": "ready", "output_filename": _Path(output_path).name})
     except Exception:
         pass
-
-    # Success: compute final stats
-    try:
-        final_size = os.path.getsize(output_path)
-    except Exception:
-        final_size = 0
     
     final_size_mb = round(final_size / (1024*1024), 2) if final_size else 0
     
