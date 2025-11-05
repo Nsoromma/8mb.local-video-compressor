@@ -171,7 +171,7 @@ def run_startup_tests(hw_info: Dict) -> Dict[str, bool]:
     sys.stdout.flush()
     
     cache: Dict[str, bool] = {}
-    test_results = []  # Track for summary table
+    test_results = {}  # Dict[codec, tuple] for easier lookup
     
     # Test all common codecs for this hardware type
     test_codecs = []
@@ -224,7 +224,7 @@ def run_startup_tests(hw_info: Dict) -> Dict[str, bool]:
                 logger.warning(f"  [{codec:15s}] ✗ UNAVAILABLE - Not in ffmpeg -encoders list")
                 cache_key = f"{actual_encoder}:{':'.join(init_hw_flags)}"
                 cache[cache_key] = False
-                test_results.append((codec, actual_encoder, "UNAVAILABLE", "UNAVAILABLE", "Not in ffmpeg -encoders"))
+                test_results[codec] = (actual_encoder, "UNAVAILABLE", None, "Not in ffmpeg -encoders")
                 continue
             
             # Test decoder first (if hardware codec)
@@ -250,16 +250,16 @@ def run_startup_tests(hw_info: Dict) -> Dict[str, bool]:
             overall_passed = success and (decode_passed is None or decode_passed)
             if overall_passed:
                 logger.info(f"  [{codec:15s}] ✓ OVERALL PASS")
-                test_results.append((codec, actual_encoder, "PASS", decode_passed, message))
+                test_results[codec] = (actual_encoder, "PASS", decode_passed, message)
             else:
                 logger.error(f"  [{codec:15s}] ✗ OVERALL FAIL")
-                test_results.append((codec, actual_encoder, "FAIL", decode_passed, message))
+                test_results[codec] = (actual_encoder, "FAIL", decode_passed, message)
             
             sys.stdout.flush()  # Flush after each test result
             
         except Exception as e:
             logger.error(f"  [{codec:15s}] ✗ ERROR - Exception: {str(e)}")
-            test_results.append((codec, "unknown", "ERROR", None, str(e)))
+            test_results[codec] = ("unknown", "ERROR", None, str(e))
             sys.stdout.flush()
     
     # Summary section
@@ -268,8 +268,8 @@ def run_startup_tests(hw_info: Dict) -> Dict[str, bool]:
     logger.info("  TEST SUMMARY")
     logger.info("─" * 70)
     
-    passed = sum(1 for _, _, status, _, _ in test_results if status == "PASS")
-    failed = sum(1 for _, _, status, _, _ in test_results if status in ("FAIL", "ERROR", "UNAVAILABLE"))
+    passed = sum(1 for _, status, _, _ in test_results.values() if status == "PASS")
+    failed = sum(1 for _, status, _, _ in test_results.values() if status in ("FAIL", "ERROR", "UNAVAILABLE"))
     total_tested = len(test_results)
     
     logger.info(f"  Total Encoders Tested: {total_tested}")
@@ -278,7 +278,7 @@ def run_startup_tests(hw_info: Dict) -> Dict[str, bool]:
     logger.info("")
     
     if failed > 0:
-        failed_list = [c for (c, _, status, _, _) in test_results if status in ("FAIL","ERROR","UNAVAILABLE")]
+        failed_list = [c for c, (_, status, _, _) in test_results.items() if status in ("FAIL","ERROR","UNAVAILABLE")]
         if failed_list:
             logger.warning("  Failing encoders: %s", ", ".join(failed_list))
         logger.warning("  Failed encoders will automatically fall back to CPU encoding.")
@@ -293,17 +293,14 @@ def run_startup_tests(hw_info: Dict) -> Dict[str, bool]:
         redis_url = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
         redis_client = Redis.from_url(redis_url, decode_responses=True)
         # Store which encoders passed tests and last message
-        for idx, codec in enumerate(test_codecs):
-            if idx >= len(test_results):
-                continue
+        for codec, (actual_encoder, encode_status, decode_status, encode_msg) in test_results.items():
             try:
                 from .hw_detect import map_codec_to_hw
-                actual_encoder, _, init_hw_flags = map_codec_to_hw(codec, hw_info)
+                _, _, init_hw_flags = map_codec_to_hw(codec, hw_info)
                 cache_key = f"{actual_encoder}:{':'.join(init_hw_flags)}"
                 
-                # Get test result
-                _, _, encode_status, decode_status, encode_msg = test_results[idx]
-                encode_passed = (encode_status == "PASS" or encode_status == "UNAVAILABLE")
+                # Determine if encode passed
+                encode_passed = (encode_status == "PASS")
                 overall_passed = encode_passed and (decode_status is None or decode_status is True)
                 
                 # Save boolean flag for overall pass

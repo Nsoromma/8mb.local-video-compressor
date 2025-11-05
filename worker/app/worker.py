@@ -502,7 +502,7 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
                                 current_bitrate_kbps = 0.0
                                 last_progress = 0.0
                                 time_start = time.time()  # Reset start time for wallclock
-                                speed_samples.clear()  # Clear speed history
+                                speed_ewma = None  # Reset speed EWMA
                                 _publish(self.request.id, {"type": "log", "message": "⚠️ Encoding restarted, resetting progress..."})
                             
                             current_time_s = new_time_s
@@ -573,10 +573,9 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
                             # Safety clamp
                             scaled_progress = min(max(scaled_progress, 0.0), encoding_portion)
                             
-                            # Only report progress if stable (skip confused early phase)
-                            # Report only if: progress >= 5% AND no huge jumps (< 50% jump)
-                            should_report = (scaled_progress >= 0.05 and 
-                                           (last_progress == 0 or (scaled_progress - last_progress) < 0.50))
+                            # Skip reporting during confused early phase (first 3%)
+                            # This skips FFmpeg's analysis phase that can show misleading progress
+                            should_report = scaled_progress >= 0.03
                             
                             if should_report:
                                 last_progress = scaled_progress
