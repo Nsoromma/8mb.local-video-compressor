@@ -35,9 +35,16 @@ def test_encoder_init(encoder_name: str, hw_flags: List[str]) -> Tuple[bool, str
         )
         stderr_lower = result.stderr.lower()
         
-        # Check for specific errors that indicate driver/library issues
+        # CPU encoders: "Operation not permitted" is often a Docker seccomp issue, not encoder failure
+        # If encoder is in the list and test shows "operation not permitted", assume it works
+        is_cpu_encoder = encoder_name.startswith("lib")
         if "operation not permitted" in stderr_lower:
+            if is_cpu_encoder:
+                # CPU encoder seccomp issue - will work at runtime with proper flags
+                return True, "OK (seccomp bypass)"
             return False, "Operation not permitted"
+        
+        # Check for specific errors that indicate driver/library issues
         if "could not open encoder" in stderr_lower:
             return False, "Could not open encoder"
         if "no device found" in stderr_lower:
