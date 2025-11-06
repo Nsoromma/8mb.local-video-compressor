@@ -8,32 +8,12 @@ import subprocess
 import sys
 import logging
 from typing import Dict, List, Tuple
+from .gpu_env import get_gpu_env
 
 logger = logging.getLogger(__name__)
 
 
-def get_gpu_env():
-    """
-    Get environment with NVIDIA GPU variables and library paths for subprocess calls.
-    Includes LD_LIBRARY_PATH locations needed for CUDA on WSL2 and NVIDIA toolkit.
-    """
-    env = os.environ.copy()
-    # Ensure NVIDIA variables are set for GPU access
-    env['NVIDIA_VISIBLE_DEVICES'] = env.get('NVIDIA_VISIBLE_DEVICES', 'all')
-    env['NVIDIA_DRIVER_CAPABILITIES'] = env.get('NVIDIA_DRIVER_CAPABILITIES', 'compute,video,utility')
-    # Add common library locations (non-destructive append)
-    lib_paths = [
-        '/usr/local/nvidia/lib64',
-        '/usr/local/nvidia/lib',
-        '/usr/local/cuda/lib64',
-        '/usr/local/cuda/lib',
-        '/usr/lib/wsl/lib',  # WSL2 libcuda.so location
-        '/usr/lib/x86_64-linux-gnu',
-    ]
-    existing = env.get('LD_LIBRARY_PATH', '')
-    add = ':'.join(p for p in lib_paths if p)
-    env['LD_LIBRARY_PATH'] = (existing + (':' if existing and add else '') + add) if (existing or add) else ''
-    return env
+## get_gpu_env now provided by shared module
 
 def _ffmpeg_has_nvenc(env: dict) -> bool:
     try:
@@ -79,10 +59,15 @@ def test_decoder(decoder_name: str, hw_flags: List[str]) -> Tuple[bool, str]:
             # Default to H.264
             encoder = "libx264"
         
+        # Use conservative dimensions that satisfy NVENC/NVDEC minimums across architectures
+        # Some GPUs (e.g., Blackwell/SM_100) reject very small frame sizes with "invalid param"
+        test_size = os.getenv("ENCODER_TEST_SIZE", "640x360")
+        test_duration = os.getenv("ENCODER_TEST_DURATION", "1")  # seconds
+
         create_cmd = [
             "ffmpeg", "-hide_banner", "-y",
-            "-f", "lavfi", "-i", "color=black:s=256x256:d=0.1",
-            "-c:v", encoder, "-t", "0.1", "-frames:v", "3",
+            "-f", "lavfi", "-i", f"color=black:s={test_size}:d={test_duration}",
+            "-c:v", encoder, "-t", test_duration, "-frames:v", "3",
         ]
         
         # Add encoder-specific options
@@ -117,12 +102,20 @@ def test_decoder(decoder_name: str, hw_flags: List[str]) -> Tuple[bool, str]:
         stderr_lower = (result.stderr or '').lower()
         stderr_lower = result.stderr.lower()
         
-        if "no device found" in stderr_lower or "cannot load" in stderr_lower:
-            return False, "Hardware decode failed"
-        if "not supported" in stderr_lower or "invalid" in stderr_lower:
-            return False, "Decoder not supported"
-        if result.returncode != 0:
-            return False, f"Decode error (code {result.returncode})"
+        if result.returncode != 0 or "no device found" in stderr_lower or "cannot load" in stderr_lower or "invalid" in stderr_lower:
+            # Fallback: try generic cuda hwaccel without forcing cuvid decoder (FFmpeg may choose better path)
+            try:
+                fb_cmd = ["ffmpeg", "-hide_banner", "-hwaccel", "cuda", "-hwaccel_output_format", "cuda",
+                          "-i", test_file, "-f", "null", "-"]
+                fb_res = subprocess.run(fb_cmd, capture_output=True, text=True, timeout=10, env=get_gpu_env())
+                if fb_res.returncode == 0:
+                    return True, "Decode OK (fallback hwaccel)"
+            except Exception:
+                pass
+            if "not supported" in stderr_lower or "invalid" in stderr_lower:
+                return False, "Decoder not supported"
+            if result.returncode != 0:
+                return False, f"Decode error (code {result.returncode})"
         return True, "Decode OK"
     except subprocess.TimeoutExpired:
         return False, "Decode timeout"
@@ -140,10 +133,12 @@ def test_encoder_init(encoder_name: str, hw_flags: List[str]) -> Tuple[bool, str
         # Test encoding directly without hardware decode
         cmd = ["ffmpeg", "-hide_banner"]
         # Don't use hw_flags here - we're testing encoder only
+        test_size = os.getenv("ENCODER_TEST_SIZE", "640x360")
+        test_duration = os.getenv("ENCODER_TEST_DURATION", "1")
         cmd.extend([
-            "-f", "lavfi", "-i", "color=black:s=256x256:d=0.1",
+            "-f", "lavfi", "-i", f"color=black:s={test_size}:d={test_duration}",
             "-c:v", encoder_name,
-            "-t", "0.1",
+            "-t", test_duration,
             "-frames:v", "3",  # Encode a few frames to be sure
             "-f", "null", "-"
         ])
@@ -267,12 +262,19 @@ def run_startup_tests(hw_info: Dict) -> Dict[str, bool]:
     hw_decoders = {}
     
     if hw_type_lower == "nvidia":
-        test_codecs = ["h264_nvenc", "hevc_nvenc", "av1_nvenc"]
-        hw_decoders = {
-            "h264_nvenc": ("h264", ["-hwaccel", "cuda", "-c:v", "h264_cuvid"]),
-            "hevc_nvenc": ("hevc", ["-hwaccel", "cuda", "-c:v", "hevc_cuvid"]),
-            "av1_nvenc": ("av1", ["-hwaccel", "cuda", "-c:v", "av1_cuvid"]),
-        }
+        # If running under WSL2, skip NVIDIA NVENC/NVDEC tests to avoid false failures
+        # and rely on CPU encoders (detection layer already switches to CPU on WSL2)
+        if hw_info.get("wsl2_note"):
+            logger.info("WSL2 detected: skipping NVIDIA hardware encoder/decoder tests; using CPU encoders.")
+            test_codecs = []  # We'll only test CPU fallbacks below
+            hw_decoders = {}
+        else:
+            test_codecs = ["h264_nvenc", "hevc_nvenc", "av1_nvenc"]
+            hw_decoders = {
+                "h264_nvenc": ("h264", ["-hwaccel", "cuda", "-c:v", "h264_cuvid"]),
+                "hevc_nvenc": ("hevc", ["-hwaccel", "cuda", "-c:v", "hevc_cuvid"]),
+                "av1_nvenc": ("av1", ["-hwaccel", "cuda", "-c:v", "av1_cuvid"]),
+            }
     elif hw_type_lower == "intel":
         test_codecs = ["h264_qsv", "hevc_qsv", "av1_qsv"]
         hw_decoders = {

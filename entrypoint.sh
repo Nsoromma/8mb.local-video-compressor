@@ -30,6 +30,12 @@ CUDA_VER=${BUILD_CUDA:-unknown}
 FFMPEG_VER=${BUILD_FFMPEG:-unknown}
 DRIVER_MIN=${DRIVER_MIN:-0}
 
+# Ensure common NVIDIA/CUDA library paths are globally available (esp. under WSL2)
+# Do this early so every child process inherits it (ffmpeg dlopen for NVENC/NVDEC)
+LIB_PATHS="/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64:/usr/lib/wsl/lib:/usr/lib/x86_64-linux-gnu"
+export LD_LIBRARY_PATH="${LIB_PATHS}:${LD_LIBRARY_PATH:-}"
+export PATH="/usr/local/cuda/bin:/usr/local/nvidia/bin:${PATH}"
+
 # Try to detect NVIDIA driver version if GPU is present
 DRV=""
 if command -v nvidia-smi >/dev/null 2>&1; then
@@ -45,6 +51,15 @@ if [[ -z "${DRV}" ]]; then
   warn "NVIDIA driver not detected inside container. Running in CPU/VAAPI mode if available."
 else
   echo "Detected NVIDIA driver: ${DRV} (image flavor: ${FLAVOR}, CUDA ${CUDA_VER}, FFmpeg ${FFMPEG_VER})"
+  # Quick diagnostics for NVENC/NVDEC runtime libs
+  if command -v ldconfig >/dev/null 2>&1; then
+    if ! ldconfig -p | grep -qE 'libnvidia-encode\.so'; then
+      warn "libnvidia-encode.so not found via ldconfig search path; NVENC may fail."
+    fi
+    if ! ldconfig -p | grep -qE 'libnvcuvid\.so'; then
+      warn "libnvcuvid.so not found via ldconfig search path; NVDEC/CUVID may fail."
+    fi
+  fi
   if [[ -n "${DRIVER_MIN}" ]]; then
     if ! ver_ge "${DRV}" "${DRIVER_MIN}"; then
       warn "Your NVIDIA driver (${DRV}) is below the minimum (${DRIVER_MIN}) expected for this image."
@@ -57,9 +72,11 @@ else
   fi
 fi
 
-# Optional: quick NVENC probe to provide clearer guidance
+# Optional: quick NVENC probe to provide clearer guidance (best-effort; don't be noisy on false negatives)
 if command -v ffmpeg >/dev/null 2>&1; then
-  if ! ffmpeg -hide_banner -encoders 2>&1 | grep -qi nvenc; then
+  # Capture output to avoid set -o pipefail pitfalls and treat probe as best-effort
+  ENC_OUT=$(ffmpeg -hide_banner -encoders 2>/dev/null || true)
+  if ! echo "$ENC_OUT" | grep -qiE "(_nvenc)"; then
     warn "NVENC encoders not listed by ffmpeg."
     warn "If you expected NVIDIA acceleration: ensure Docker runs with --gpus all and NVIDIA_DRIVER_CAPABILITIES=compute,video,utility."
     if [[ "${FLAVOR}" == "legacy" ]]; then

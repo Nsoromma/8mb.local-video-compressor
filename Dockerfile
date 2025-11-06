@@ -14,7 +14,9 @@ FROM nvidia/cuda:${CUDA_VERSION}-devel-${UBUNTU_FLAVOR} AS ffmpeg-build
 ARG FFMPEG_VERSION
 ARG NV_CODEC_HEADERS_REF
 ARG NV_CODEC_COMPAT
-ARG NVCC_ARCHS="80 86 90 100"
+# Default to Blackwell-first so CUDA 13 builds target SM_100 by default.
+# You can override at build time with: --build-arg NVCC_ARCHS="86 80 90 100" (for Ada/Ampere focus)
+ARG NVCC_ARCHS="100 90 86 80"
 ARG ENABLE_LIBNPP=true
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -63,9 +65,9 @@ RUN wget -q https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz && \
                     NVCC_FLAGS="-arch=sm_${FIRST_ARCH}" && \
                     echo "Using NVCC flags: $NVCC_FLAGS (from NVCC_ARCHS='${NVCC_ARCHS}')" && \
                     NPP_FLAG="--disable-libnpp" && if [ "${ENABLE_LIBNPP}" = "true" ]; then NPP_FLAG="--enable-libnpp"; fi && \
-                        ./configure \
+            ./configure \
       --enable-nonfree --enable-gpl \
-                --enable-cuda-nvcc --nvcc="$NVCC_PATH" --nvccflags="$NVCC_FLAGS" ${NPP_FLAG} --enable-nvenc \
+        --enable-cuda-nvcc --nvcc="$NVCC_PATH" --nvccflags="$NVCC_FLAGS" ${NPP_FLAG} --enable-nvenc --enable-nvdec --enable-cuvid \
       --enable-vaapi \
       --enable-libx264 --enable-libx265 --enable-libvpx --enable-libopus --enable-libaom --enable-libdav1d \
       --extra-cflags=-I/usr/local/cuda/include \

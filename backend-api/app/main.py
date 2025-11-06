@@ -20,6 +20,7 @@ from redis.asyncio import Redis
 import psutil
 
 from .auth import basic_auth
+from common.gpu_env import get_gpu_env
 from .config import settings
 from .celery_app import celery_app
 from .models import UploadResponse, CompressRequest, StatusResponse, AuthSettings, AuthSettingsUpdate, PasswordChange, DefaultPresets, AvailableCodecsResponse, CodecVisibilitySettings, PresetProfile, PresetProfilesResponse, SetDefaultPresetRequest, SizeButtons, RetentionHours, JobMetadata, QueueStatusResponse
@@ -83,7 +84,7 @@ def _ffprobe(input_path: Path) -> dict:
         "-of", "json",
         str(input_path)
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True, env=get_gpu_env())
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr)
     data = json.loads(proc.stdout)
@@ -142,7 +143,7 @@ def _get_system_capabilities() -> dict:
         q = "index,name,memory.total,memory.used,driver_version,uuid"
         res = subprocess.run(
             ["nvidia-smi", f"--query-gpu={q}", "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=2
+            capture_output=True, text=True, timeout=2, env=get_gpu_env()
         )
         if res.returncode == 0 and res.stdout.strip():
             lines = [l.strip() for l in res.stdout.strip().splitlines() if l.strip()]
@@ -976,7 +977,7 @@ async def gpu_diagnostics():
     """
     def run_cmd(cmd: list[str], timeout: int = 6):
         try:
-            p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=get_gpu_env())
             return {
                 "cmd": " ".join(cmd),
                 "rc": p.returncode,

@@ -1,28 +1,7 @@
 import json
-import os
 import subprocess
 from typing import Optional
-
-
-def get_gpu_env():
-    """
-    Get environment with NVIDIA GPU variables and library paths for subprocess calls.
-    """
-    env = os.environ.copy()
-    env['NVIDIA_VISIBLE_DEVICES'] = env.get('NVIDIA_VISIBLE_DEVICES', 'all')
-    env['NVIDIA_DRIVER_CAPABILITIES'] = env.get('NVIDIA_DRIVER_CAPABILITIES', 'compute,video,utility')
-    lib_paths = [
-        '/usr/local/nvidia/lib64',
-        '/usr/local/nvidia/lib',
-        '/usr/local/cuda/lib64',
-        '/usr/local/cuda/lib',
-        '/usr/lib/wsl/lib',
-        '/usr/lib/x86_64-linux-gnu',
-    ]
-    existing = env.get('LD_LIBRARY_PATH', '')
-    add = ':'.join(p for p in lib_paths if p)
-    env['LD_LIBRARY_PATH'] = (existing + (':' if existing and add else '') + add) if (existing or add) else ''
-    return env
+from .gpu_env import get_gpu_env
 
 
 def ffprobe_info(input_path: str) -> dict:

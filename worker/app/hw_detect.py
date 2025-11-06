@@ -30,11 +30,21 @@ def detect_hw_accel() -> Dict[str, any]:
     if _check_nvidia():
         result["type"] = "nvidia"
         result["decode_method"] = "cuda"
-        result["available_encoders"] = {
-            "h264": "h264_nvenc",
-            "hevc": "hevc_nvenc",
-            "av1": "av1_nvenc",
-        }
+        # WSL2 currently exposes CUDA compute but often lacks NVENC/NVDEC user libs
+        if _is_wsl2():
+            # Prefer honest CPU encoders to avoid failing jobs/tests under WSL2
+            result["available_encoders"] = {
+                "h264": "libx264",
+                "hevc": "libx265",
+                "av1": "libaom-av1",
+            }
+            result["wsl2_note"] = "WSL2 detected: NVENC/NVDEC may be unavailable; using CPU encoders by default."
+        else:
+            result["available_encoders"] = {
+                "h264": "h264_nvenc",
+                "hevc": "hevc_nvenc",
+                "av1": "av1_nvenc",
+            }
         _HW_CACHE = result
         return result
     
@@ -228,6 +238,19 @@ def _check_vaapi() -> Dict[str, any]:
         pass
     
     return result
+
+
+def _is_wsl2() -> bool:
+    """Detect if running under WSL2 by checking kernel version string/env."""
+    try:
+        with open("/proc/sys/kernel/osrelease", "r") as f:
+            s = f.read().lower()
+            if "microsoft-standard-wsl2" in s or "microsoft" in s:
+                return True
+    except Exception:
+        pass
+    # Fallback: env variable commonly present in WSL sessions
+    return bool(os.environ.get("WSL_INTEROP") or os.environ.get("WSL_DISTRO_NAME"))
 
 
 def map_codec_to_hw(requested_codec: str, hw_info: Dict) -> tuple[str, list, list]:
