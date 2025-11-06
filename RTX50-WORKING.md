@@ -2,7 +2,7 @@
 
 ## ✅ Verified Working Configuration
 
-**Branch:** `rtx50-e711a8c-working`  
+**Branch:** `rtx50-blackwell`  
 **Commit:** `e711a8c` (Nov 6, 2025 @ 2:20am)  
 **Docker Image:** `jms1717/8mblocal:rtx50-working`  
 **Tested On:** RTX 5070 Ti, Driver 581.80, Windows 11 WSL2
@@ -45,7 +45,7 @@ Clone and build from the working branch:
 ```bash
 git clone https://github.com/JMS1717/8mb.local.git
 cd 8mb.local
-git checkout rtx50-e711a8c-working
+git checkout rtx50-blackwell
 
 docker build \
   --build-arg BUILD_VERSION=rtx50-working \
@@ -166,7 +166,7 @@ docker logs 8mblocal
 
 ## Version History
 
-- **e711a8c (Nov 6, 2025):** ✅ Working RTX 50-series NVENC support
+- **e711a8c (Nov 6, 2025) - Branch: rtx50-blackwell:** ✅ Working RTX 50-series NVENC support
   - All 6 encoders pass
   - Requires WSL driver mount
   - CUDA 13.0.1 + FFmpeg 8.0
