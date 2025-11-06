@@ -59,6 +59,8 @@ FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04
 # Build-time version (can be overridden)
 ARG BUILD_VERSION=123
 ENV APP_VERSION=${BUILD_VERSION}
+ARG BUILD_COMMIT=unknown
+ENV BUILD_COMMIT=${BUILD_COMMIT}
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
@@ -104,6 +106,12 @@ COPY worker/app /app/worker
 
 # Copy pre-built frontend
 COPY --from=frontend-build /frontend/build /app/frontend-build
+
+# Embed build metadata for runtime introspection
+RUN echo "Version: ${APP_VERSION}" > /app/VERSION && \
+    echo "Commit: ${BUILD_COMMIT}" >> /app/VERSION && \
+    echo -n "Built: " >> /app/VERSION && date -u +%FT%TZ >> /app/VERSION && \
+    echo "FFmpeg: $(ffmpeg -version | head -n1)" >> /app/VERSION
 
 # Create necessary directories
 RUN mkdir -p /app/uploads /app/outputs /var/log/supervisor /var/lib/redis /var/log/redis
