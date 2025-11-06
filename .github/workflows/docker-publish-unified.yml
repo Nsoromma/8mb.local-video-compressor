@@ -1,9 +1,6 @@
 name: docker-publish-unified
 
 on:
-  push:
-    branches: [ main, master, single-container ]
-    tags: [ 'v*.*.*' ]
   workflow_dispatch:
 
 jobs:
