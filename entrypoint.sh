@@ -32,7 +32,30 @@ DRIVER_MIN=${DRIVER_MIN:-0}
 
 # Ensure common NVIDIA/CUDA library paths are globally available (esp. under WSL2)
 # Do this early so every child process inherits it (ffmpeg dlopen for NVENC/NVDEC)
-LIB_PATHS="/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64:/usr/lib/wsl/lib:/usr/lib/x86_64-linux-gnu"
+WSL_DRV_DIR=$(find /usr/lib/wsl/drivers -type d -name 'nvami.inf_*' 2>/dev/null | head -1)
+if [ -n "$WSL_DRV_DIR" ] && [ -f "$WSL_DRV_DIR/libcuda.so.1.1" ]; then
+    echo "Using WSL2 CUDA driver for RTX 50-series support: $WSL_DRV_DIR"
+    
+  # RTX 50-series fix: Work around stub libcuda that blocks the real WSL driver
+  # The nvidia/cuda base image includes a 172KB stub libcuda.so.1 that doesn't work with WSL2
+  # nvidia-container-toolkit mounts this file, so we can't delete it, but we can use LD_PRELOAD
+  if [ -f "/usr/lib/x86_64-linux-gnu/libcuda.so.1" ]; then
+    STUB_SIZE=$(stat -c%s "/usr/lib/x86_64-linux-gnu/libcuda.so.1" 2>/dev/null || echo "0")
+    if [ "$STUB_SIZE" -lt "1000000" ]; then  # Real driver is ~26MB, stub is ~172KB
+      echo "Found stub libcuda.so.1 ($STUB_SIZE bytes), using LD_PRELOAD to force real WSL driver..."
+      # Use LD_PRELOAD to force loading the real WSL driver instead of the stub
+      export LD_PRELOAD="$WSL_DRV_DIR/libcuda.so.1.1:${LD_PRELOAD:-}"
+      echo "✓ LD_PRELOAD set to: $WSL_DRV_DIR/libcuda.so.1.1"
+    fi
+  fi
+    
+    # Set library paths with WSL driver directory prioritized
+    LIB_PATHS="${WSL_DRV_DIR}:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64:/usr/lib/wsl/lib:/usr/lib/x86_64-linux-gnu"
+else
+    echo "Warning: WSL driver not found, using standard paths"
+    # Fallback: use standard paths
+    LIB_PATHS="/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64:/usr/lib/wsl/lib:/usr/lib/x86_64-linux-gnu"
+fi
 export LD_LIBRARY_PATH="${LIB_PATHS}:${LD_LIBRARY_PATH:-}"
 export PATH="/usr/local/cuda/bin:/usr/local/nvidia/bin:${PATH}"
 

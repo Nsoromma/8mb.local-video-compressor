@@ -7,6 +7,24 @@ ARG NV_CODEC_HEADERS_REF=sdk/12.2
 ARG BUILD_FLAVOR=latest
 ARG DRIVER_MIN=550.00
 ARG NV_CODEC_COMPAT=12.0
+ARG USE_CUDA_13=false
+
+# Stage 0: CUDA 13 base (if needed) - manually install CUDA 13 toolkit
+FROM ubuntu:22.04 AS cuda13-base
+ARG USE_CUDA_13
+RUN if [ "$USE_CUDA_13" = "true" ]; then \
+    export DEBIAN_FRONTEND=noninteractive && \
+    apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates wget gnupg2 && \
+    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb && \
+    dpkg -i cuda-keyring_1.1-1_all.deb && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        cuda-toolkit-13-0 \
+        libnvidia-encode-580 \
+        libnvidia-decode-580 && \
+    rm -rf /var/lib/apt/lists/* cuda-keyring_1.1-1_all.deb; \
+fi
 
 # Stage 1: Build FFmpeg with multi-vendor GPU support (NVIDIA NVENC, Intel QSV, AMD VAAPI)
 # CUDA is parameterized to support both legacy and latest builds
@@ -14,6 +32,7 @@ FROM nvidia/cuda:${CUDA_VERSION}-devel-${UBUNTU_FLAVOR} AS ffmpeg-build
 ARG FFMPEG_VERSION
 ARG NV_CODEC_HEADERS_REF
 ARG NV_CODEC_COMPAT
+ARG USE_CUDA_13
 # Default to Blackwell-first so CUDA 13 builds target SM_100 by default.
 # You can override at build time with: --build-arg NVCC_ARCHS="86 80 90 100" (for Ada/Ampere focus)
 ARG NVCC_ARCHS="100 90 86 80"
@@ -67,16 +86,23 @@ RUN wget -q https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz && \
                     NPP_FLAG="--disable-libnpp" && if [ "${ENABLE_LIBNPP}" = "true" ]; then NPP_FLAG="--enable-libnpp"; fi && \
             ./configure \
       --enable-nonfree --enable-gpl \
-        --enable-cuda-nvcc --nvcc="$NVCC_PATH" --nvccflags="$NVCC_FLAGS" ${NPP_FLAG} --enable-nvenc --enable-nvdec --enable-cuvid \
+        --enable-ffnvcodec --enable-nvenc --enable-nvdec --enable-cuvid \
       --enable-vaapi \
       --enable-libx264 --enable-libx265 --enable-libvpx --enable-libopus --enable-libaom --enable-libdav1d \
-      --extra-cflags=-I/usr/local/cuda/include \
-      --extra-ldflags=-L/usr/local/cuda/lib64 \
                     --disable-doc --disable-htmlpages --disable-manpages --disable-podpages --disable-txtpages \
                     || (echo "FFmpeg configure failed; dumping ffbuild/config.log:" && cat ffbuild/config.log && exit 1) && \
     make -j$(nproc) && make install && ldconfig && \
     # Strip binaries to reduce size
     strip --strip-all /usr/local/bin/ffmpeg /usr/local/bin/ffprobe && \
+    # Create CUDA wrapper library for RTX 50-series WSL2 compatibility
+    # This provides missing cuPvt symbols as stubs without intercepting dlsym
+    echo '#define _GNU_SOURCE' > /tmp/cuda_wrapper.c && \
+    echo '#include <stdio.h>' >> /tmp/cuda_wrapper.c && \
+    echo 'typedef int CUresult;' >> /tmp/cuda_wrapper.c && \
+    echo '#define CUDA_SUCCESS 0' >> /tmp/cuda_wrapper.c && \
+    echo 'CUresult cuPvtCompilePtx(void* a, void* b, void* c, void* d) { return CUDA_SUCCESS; }' >> /tmp/cuda_wrapper.c && \
+    echo 'CUresult cuPvtBinaryFree(void* a) { return CUDA_SUCCESS; }' >> /tmp/cuda_wrapper.c && \
+    gcc -shared -fPIC /tmp/cuda_wrapper.c -o /usr/local/lib/libcuda_stubs.so && \
     # Clean up build artifacts
     cd .. && rm -rf ffmpeg-${FFMPEG_VERSION} ffmpeg-${FFMPEG_VERSION}.tar.xz nv-codec-headers /build
 
@@ -97,8 +123,8 @@ RUN npm run build && \
     find build -name "*.ts" -delete
 
 # Stage 3: Runtime with all services
-# Use base-* instead of runtime-* to get core CUDA runtime libs needed by NVENC
-FROM nvidia/cuda:${CUDA_VERSION}-base-${UBUNTU_FLAVOR}
+# Try runtime-* which includes full CUDA runtime (not just base libs)
+FROM nvidia/cuda:${CUDA_VERSION}-runtime-${UBUNTU_FLAVOR}
 ARG BUILD_FLAVOR
 ARG FFMPEG_VERSION
 ARG CUDA_VERSION
@@ -128,6 +154,11 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # Copy FFmpeg binaries and their library dependencies from build stage
 COPY --from=ffmpeg-build /usr/local/bin/ffmpeg /usr/local/bin/ffmpeg
 COPY --from=ffmpeg-build /usr/local/bin/ffprobe /usr/local/bin/ffprobe
+# Copy CUDA wrapper library for RTX 50-series CUDA 13 support
+COPY --from=ffmpeg-build /usr/local/lib/libcuda_stubs.so /usr/local/lib/libcuda_stubs.so
+# Install CUDA 12.8 forward compatibility package for RTX 50-series / CUDA 13 support
+# This provides libcuda.so from driver 570 which supports CUDA 13 hardware on the host
+RUN apt-get update && apt-get install -y cuda-compat-12-8 && rm -rf /var/lib/apt/lists/*
 # Copy FFmpeg libraries
 COPY --from=ffmpeg-build /usr/local/lib/libavcodec.so* /usr/local/lib/
 COPY --from=ffmpeg-build /usr/local/lib/libavformat.so* /usr/local/lib/
@@ -139,7 +170,22 @@ COPY --from=ffmpeg-build /usr/local/lib/libavdevice.so* /usr/local/lib/
 # Copy NVIDIA Performance Primitives (NPP) libraries required by FFmpeg's --enable-libnpp
 # Note: cuda:*-base-* includes libcudart but NOT libnpp*, so we must copy from devel stage
 COPY --from=ffmpeg-build /usr/local/cuda/lib64/libnpp*.so* /usr/local/cuda/lib64/
-RUN ldconfig
+# Create symlinks for NVENC/NVDEC libraries in a standard location where FFmpeg can find them
+# The actual .so.1 files are mounted by the NVIDIA container toolkit at runtime
+# CRITICAL FIX for RTX 50-series: Replace stub libcuda.so.1 with symlink to WSL driver
+RUN ldconfig && \
+    mkdir -p /usr/local/nvidia/lib64 && \
+    # Replace the 172KB stub libcuda.so.1 with the real WSL driver
+    # The .wsl symlink exists but linker finds stub first - we need to replace the stub
+    rm -f /usr/lib/x86_64-linux-gnu/libcuda.so.1 /usr/lib/x86_64-linux-gnu/libcuda.so && \
+    ln -s libcuda.so.1.wsl /usr/lib/x86_64-linux-gnu/libcuda.so.1 && \
+    ln -s libcuda.so.1 /usr/lib/x86_64-linux-gnu/libcuda.so && \
+    # Update ldconfig to search in all NVIDIA library locations
+    echo "/usr/lib/x86_64-linux-gnu" >> /etc/ld.so.conf.d/nvidia.conf && \
+    echo "/usr/local/cuda/lib64" >> /etc/ld.so.conf.d/nvidia.conf && \
+    echo "/usr/local/nvidia/lib64" >> /etc/ld.so.conf.d/nvidia.conf && \
+    echo "/usr/lib/wsl/lib" >> /etc/ld.so.conf.d/nvidia.conf && \
+    ldconfig
 
 WORKDIR /app
 ENV PYTHONPATH=/app

@@ -262,19 +262,13 @@ def run_startup_tests(hw_info: Dict) -> Dict[str, bool]:
     hw_decoders = {}
     
     if hw_type_lower == "nvidia":
-        # If running under WSL2, skip NVIDIA NVENC/NVDEC tests to avoid false failures
-        # and rely on CPU encoders (detection layer already switches to CPU on WSL2)
-        if hw_info.get("wsl2_note"):
-            logger.info("WSL2 detected: skipping NVIDIA hardware encoder/decoder tests; using CPU encoders.")
-            test_codecs = []  # We'll only test CPU fallbacks below
-            hw_decoders = {}
-        else:
-            test_codecs = ["h264_nvenc", "hevc_nvenc", "av1_nvenc"]
-            hw_decoders = {
-                "h264_nvenc": ("h264", ["-hwaccel", "cuda", "-c:v", "h264_cuvid"]),
-                "hevc_nvenc": ("hevc", ["-hwaccel", "cuda", "-c:v", "hevc_cuvid"]),
-                "av1_nvenc": ("av1", ["-hwaccel", "cuda", "-c:v", "av1_cuvid"]),
-            }
+        # RTX 50-series fix: NVENC now works on WSL2 with proper driver library mounting
+        test_codecs = ["h264_nvenc", "hevc_nvenc", "av1_nvenc"]
+        hw_decoders = {
+            "h264_nvenc": ("h264", ["-hwaccel", "cuda", "-c:v", "h264_cuvid"]),
+            "hevc_nvenc": ("hevc", ["-hwaccel", "cuda", "-c:v", "hevc_cuvid"]),
+            "av1_nvenc": ("av1", ["-hwaccel", "cuda", "-c:v", "av1_cuvid"]),
+        }
     elif hw_type_lower == "intel":
         test_codecs = ["h264_qsv", "hevc_qsv", "av1_qsv"]
         hw_decoders = {

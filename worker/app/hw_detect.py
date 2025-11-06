@@ -30,21 +30,12 @@ def detect_hw_accel() -> Dict[str, any]:
     if _check_nvidia():
         result["type"] = "nvidia"
         result["decode_method"] = "cuda"
-        # WSL2 currently exposes CUDA compute but often lacks NVENC/NVDEC user libs
-        if _is_wsl2():
-            # Prefer honest CPU encoders to avoid failing jobs/tests under WSL2
-            result["available_encoders"] = {
-                "h264": "libx264",
-                "hevc": "libx265",
-                "av1": "libaom-av1",
-            }
-            result["wsl2_note"] = "WSL2 detected: NVENC/NVDEC may be unavailable; using CPU encoders by default."
-        else:
-            result["available_encoders"] = {
-                "h264": "h264_nvenc",
-                "hevc": "hevc_nvenc",
-                "av1": "av1_nvenc",
-            }
+        # Always try NVENC first - WSL2 support has improved
+        result["available_encoders"] = {
+            "h264": "h264_nvenc",
+            "hevc": "hevc_nvenc",
+            "av1": "av1_nvenc",
+        }
         _HW_CACHE = result
         return result
     

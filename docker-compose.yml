@@ -3,7 +3,8 @@ services:
     # Choose the image tag for your driver:
     # - latest (driver >= 550): jms1717/8mblocal:latest
     # - legacy (535.x drivers): jms1717/8mblocal:legacy
-    image: jms1717/8mblocal:latest
+    # Using locally built image with RTX 50-series NVENC fix
+    image: 8mblocal:latest
     container_name: 8mblocal
     ports:
       - "8001:8001"
@@ -11,12 +12,12 @@ services:
       - ./uploads:/app/uploads
       - ./outputs:/app/outputs
       - ./.env:/app/.env  # optional custom settings
+      # RTX 50-series fix: Mount full WSL driver directory for CUDA 13.0 DXG libraries
+      - /usr/lib/wsl/drivers:/usr/lib/wsl/drivers:ro
     environment:
       - REDIS_URL=redis://127.0.0.1:6379/0
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
-    # Enable NVIDIA GPUs with Compose
-    gpus: all
     # Enable NVIDIA GPU acceleration (Docker Desktop / Linux with nvidia-container-toolkit)
     deploy:
       resources:
