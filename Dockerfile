@@ -14,6 +14,8 @@ FROM nvidia/cuda:${CUDA_VERSION}-devel-${UBUNTU_FLAVOR} AS ffmpeg-build
 ARG FFMPEG_VERSION
 ARG NV_CODEC_HEADERS_REF
 ARG NV_CODEC_COMPAT
+ARG NVCC_ARCHS="80 86 90"
+ARG ENABLE_LIBNPP=true
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -22,20 +24,26 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     build-essential yasm nasm cmake pkg-config git wget ca-certificates \
     libnuma-dev libx264-dev libx265-dev libvpx-dev libopus-dev \
     libaom-dev libdav1d-dev \
+    zlib1g-dev libbz2-dev liblzma-dev \
     libva-dev libdrm-dev
 
 WORKDIR /build
 
+# Ensure CUDA toolchain (nvcc) is on PATH for FFmpeg configure
+ENV CUDA_HOME=/usr/local/cuda
+ENV PATH=/usr/local/cuda/bin:${PATH}
+
 # NVIDIA NVENC headers
 # Use NV_CODEC_COMPAT for legacy builds (sdk/12.0 for FFmpeg 6.x, sdk/12.2+ for FFmpeg 7+)
-RUN git clone --depth=1 https://github.com/FFmpeg/nv-codec-headers.git && \
-    cd nv-codec-headers && \
+RUN REF="${NV_CODEC_HEADERS_REF}" && \
     if [ -n "${NV_CODEC_COMPAT}" ] && [ "${NV_CODEC_COMPAT}" != "${NV_CODEC_HEADERS_REF}" ]; then \
         echo "Using ${NV_CODEC_COMPAT} headers for FFmpeg ${FFMPEG_VERSION} compatibility" && \
-        git checkout ${NV_CODEC_COMPAT} || echo "Warning: ${NV_CODEC_COMPAT} not found, using ${NV_CODEC_HEADERS_REF}"; \
-    else \
-        git checkout ${NV_CODEC_HEADERS_REF} || echo "Ref ${NV_CODEC_HEADERS_REF} not found, using default HEAD"; \
+        REF="${NV_CODEC_COMPAT}"; \
     fi && \
+    git clone --depth=1 --branch "${REF}" https://github.com/FFmpeg/nv-codec-headers.git || \
+    (echo "Warning: ${REF} not found, falling back to ${NV_CODEC_HEADERS_REF}" && \
+     git clone --depth=1 --branch "${NV_CODEC_HEADERS_REF}" https://github.com/FFmpeg/nv-codec-headers.git) && \
+    cd nv-codec-headers && \
     make install && cd ..
 
 # Ensure pkg-config can find ffnvcodec (nv-codec-headers installs ffnvcodec.pc under /usr/local/lib/pkgconfig)
@@ -45,15 +53,25 @@ ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH
 
 # Build FFmpeg with all hardware acceleration support
 RUN wget -q https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz && \
-    tar xf ffmpeg-${FFMPEG_VERSION}.tar.xz && cd ffmpeg-${FFMPEG_VERSION} && \
-        ./configure \
+            tar xf ffmpeg-${FFMPEG_VERSION}.tar.xz && cd ffmpeg-${FFMPEG_VERSION} && \
+                # Robustly locate nvcc across CUDA layouts (e.g., /usr/local/cuda or /usr/local/cuda-13.0)
+                NVCC_PATH="$(ls -1d /usr/local/cuda*/bin/nvcc 2>/dev/null | head -n1)" && \
+                if [ -z "$NVCC_PATH" ]; then echo "nvcc not found under /usr/local/cuda*" && exit 1; fi && \
+                echo "Using NVCC at: $NVCC_PATH" && \
+                    # Use a single target arch during configure/build to avoid nvcc -ptx multi-arch restriction
+                    FIRST_ARCH=$(echo ${NVCC_ARCHS} | awk '{print $1}') && \
+                    NVCC_FLAGS="-arch=sm_${FIRST_ARCH}" && \
+                    echo "Using NVCC flags: $NVCC_FLAGS (from NVCC_ARCHS='${NVCC_ARCHS}')" && \
+                    NPP_FLAG="--disable-libnpp" && if [ "${ENABLE_LIBNPP}" = "true" ]; then NPP_FLAG="--enable-libnpp"; fi && \
+                        ./configure \
       --enable-nonfree --enable-gpl \
-      --enable-cuda-nvcc --enable-libnpp --enable-nvenc \
+                --enable-cuda-nvcc --nvcc="$NVCC_PATH" --nvccflags="$NVCC_FLAGS" ${NPP_FLAG} --enable-nvenc \
       --enable-vaapi \
       --enable-libx264 --enable-libx265 --enable-libvpx --enable-libopus --enable-libaom --enable-libdav1d \
       --extra-cflags=-I/usr/local/cuda/include \
       --extra-ldflags=-L/usr/local/cuda/lib64 \
-      --disable-doc --disable-htmlpages --disable-manpages --disable-podpages --disable-txtpages && \
+                    --disable-doc --disable-htmlpages --disable-manpages --disable-podpages --disable-txtpages \
+                    || (echo "FFmpeg configure failed; dumping ffbuild/config.log:" && cat ffbuild/config.log && exit 1) && \
     make -j$(nproc) && make install && ldconfig && \
     # Strip binaries to reduce size
     strip --strip-all /usr/local/bin/ffmpeg /usr/local/bin/ffprobe && \
@@ -122,6 +140,7 @@ COPY --from=ffmpeg-build /usr/local/cuda/lib64/libnpp*.so* /usr/local/cuda/lib64
 RUN ldconfig
 
 WORKDIR /app
+ENV PYTHONPATH=/app
 
 # Install Python dependencies (backend + worker combined)
 COPY backend-api/requirements.txt /app/backend-requirements.txt
@@ -137,6 +156,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # Copy application code
 COPY backend-api/app /app/backend
 COPY worker/app /app/worker
+COPY common /app/common
 
 # Copy pre-built frontend
 COPY --from=frontend-build /frontend/build /app/frontend-build
