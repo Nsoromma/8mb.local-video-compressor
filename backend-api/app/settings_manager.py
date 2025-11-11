@@ -6,6 +6,9 @@ import os
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 import json
+import urllib.request
+import urllib.error
+from .celery_app import celery_app
 
 
 ENV_FILE = Path("/app/.env")
@@ -71,7 +74,33 @@ def _ensure_defaults() -> Dict[str, Any]:
     except Exception:
         pass
     if 'default_preset' not in data:
-        data['default_preset'] = 'H265 9.7MB (NVENC)'
+        # Try to pick a sensible default preset based on worker-reported preferred
+        # codec (AV1>HEVC>H264). If worker info isn't available, fall back to the
+        # first preset in the list to avoid hardcoding a codec.
+        preferred_encoder = None
+        try:
+            # Give the worker a bit more time to respond (startup tests can
+            # take a moment); 5s is still fast for a UI request but avoids
+            # spurious fallbacks to the persistent default preset.
+            res = celery_app.send_task('worker.worker.get_hardware_info')
+            hw = res.get(timeout=5) or {}
+            # worker may include a 'preferred' dict
+            if isinstance(hw, dict) and 'preferred' in hw:
+                preferred_encoder = hw['preferred'].get('encoder')
+        except Exception:
+            preferred_encoder = None
+
+        chosen_name = None
+        if preferred_encoder:
+            for p in data.get('preset_profiles', []):
+                if p.get('video_codec') == preferred_encoder:
+                    chosen_name = p.get('name')
+                    break
+        # If no match found, use first profile name
+        if not chosen_name and data.get('preset_profiles'):
+            chosen_name = data['preset_profiles'][0].get('name')
+
+        data['default_preset'] = chosen_name or 'Default'
         changed = True
     if 'retention_hours' not in data:
         # fallback to env if present
@@ -209,9 +238,82 @@ def initialize_env_if_missing():
 
 
 def get_default_presets() -> dict:
-    """Get default preset values"""
-    # Prefer settings.json default preset if present
+    """Get default preset values
+
+    Strategy:
+    1. Try to ask the worker for its 'preferred' encoder via Celery (5s timeout).
+    2. If that fails, try the local HTTP endpoint /api/hardware (3s) which
+       exposes the cached hw info from the API process.
+    3. If a preferred encoder is found, return the matching preset profile.
+    4. Otherwise fall back to the persistent default preset in settings.json
+       or legacy .env values.
+    """
     data = _ensure_defaults()
+    preferred_encoder = None
+
+    # 1) Prefer the API's cached hw info (no Celery/HTTP). Importing main
+    # here avoids circular import at module load time because this is a
+    # runtime-only operation invoked per-request.
+    try:
+        from .main import _get_hw_info_cached
+        hw = _get_hw_info_cached() or {}
+        if isinstance(hw, dict) and 'preferred' in hw:
+            preferred_encoder = hw['preferred'].get('encoder')
+    except Exception:
+        preferred_encoder = None
+
+    # 2) Fallback: try Celery (short wait) if cached info didn't have preferred
+    if not preferred_encoder:
+        try:
+            res = celery_app.send_task('worker.worker.get_hardware_info')
+            hw = res.get(timeout=10) or {}
+            if isinstance(hw, dict) and 'preferred' in hw:
+                preferred_encoder = hw['preferred'].get('encoder')
+        except Exception:
+            preferred_encoder = None
+
+    # 3) If worker has a preferred encoder, prefer a preset that matches it
+    if preferred_encoder:
+        for p in data.get('preset_profiles', []):
+            if p.get('video_codec') == preferred_encoder:
+                return {
+                    'target_mb': float(p.get('target_mb', 9.7)),
+                    'video_codec': p.get('video_codec'),
+                    'audio_codec': p.get('audio_codec', 'libopus'),
+                    'preset': p.get('preset', 'p6'),
+                    'audio_kbps': int(p.get('audio_kbps', 128)),
+                    'container': p.get('container', 'mp4'),
+                    'tune': p.get('tune', 'hq')
+                }
+
+    # 3a) If we still don't have a preferred, use the current codec visibility
+    # settings (set during startup sync) and pick the highest-priority codec
+    # that is enabled. This avoids relying on Celery/HTTP timing and keeps
+    # behavior deterministic based on persisted visibility flags.
+    if not preferred_encoder:
+        try:
+            vis = get_codec_visibility_settings()
+            # Priority: HW AV1 > HW HEVC > HW H264 > CPU AV1 > CPU HEVC > CPU H264
+            priority = ['av1_nvenc', 'hevc_nvenc', 'h264_nvenc', 'libaom_av1', 'libx265', 'libx264']
+            for enc in priority:
+                # env keys in visibility map use underscores for libaom_av1
+                if vis.get(enc):
+                    for p in data.get('preset_profiles', []):
+                        if p.get('video_codec') == enc:
+                            return {
+                                'target_mb': float(p.get('target_mb', 9.7)),
+                                'video_codec': p.get('video_codec'),
+                                'audio_codec': p.get('audio_codec', 'libopus'),
+                                'preset': p.get('preset', 'p6'),
+                                'audio_kbps': int(p.get('audio_kbps', 128)),
+                                'container': p.get('container', 'mp4'),
+                                'tune': p.get('tune', 'hq')
+                            }
+        except Exception:
+            # If anything fails, continue to persistent default fallback
+            pass
+
+    # 4) Fallback: use the persistent default preset from settings.json
     default_name = data.get('default_preset')
     for p in data.get('preset_profiles', []):
         if p.get('name') == default_name:
@@ -224,6 +326,7 @@ def get_default_presets() -> dict:
                 'container': p.get('container', 'mp4'),
                 'tune': p.get('tune', 'hq')
             }
+
     # Fallback to legacy .env
     env_vars = read_env_file()
     return {

@@ -8,21 +8,17 @@ services:
       - ./uploads:/app/uploads
       - ./outputs:/app/outputs
       - ./.env:/app/.env  # optional custom settings
+    
+    # GPU configuration: enable NVIDIA GPUs by default. Ensure your host has
+    # the NVIDIA Container Toolkit / drivers available. On Linux, mounting
+    # /dev/dri may be required for VAAPI; on WSL2 ensure GPU support is
+    # enabled in Docker Desktop.
+    gpus: all
+    # NVIDIA runtime / GPU environment (keep REDIS_URL above)
     environment:
       - REDIS_URL=redis://127.0.0.1:6379/0
-      # Intel VAAPI/QSV: enable only on Linux hosts with Intel/AMD GPUs
-      # - LIBVA_DRIVER_NAME=iHD
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
-    # === GPU configuration ===
-    # If you have an NVIDIA GPU, the container will be started with GPU access
-    # (gpus: all) so NVENC/NVDEC can be used by ffmpeg inside the container.
-    gpus: all
-
-    # If you instead have Intel/AMD and want VAAPI/QSV on Linux hosts, replace
-    # the above with the devices mapping below (uncomment and use on Linux only):
-    # devices:
-    #   - "/dev/dri:/dev/dri"
-    # environment:
-    #   - LIBVA_DRIVER_NAME=iHD
+      # Optional: enable VAAPI driver name for Intel/AMD when /dev/dri is mounted
+      - LIBVA_DRIVER_NAME=iHD
     restart: unless-stopped

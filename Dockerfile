@@ -90,12 +90,11 @@ RUN ldconfig
 
 WORKDIR /app
 
-# Install Python dependencies (backend + worker combined)
-COPY backend-api/requirements.txt /app/backend-requirements.txt
-COPY worker/requirements.txt /app/worker-requirements.txt
+# Install Python dependencies (single consolidated requirements)
+COPY requirements.txt /app/requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip3 install --no-cache-dir -r /app/backend-requirements.txt -r /app/worker-requirements.txt && \
-    rm /app/backend-requirements.txt /app/worker-requirements.txt && \
+    pip3 install --no-cache-dir -r /app/requirements.txt && \
+    rm /app/requirements.txt && \
     # Remove pip cache and unnecessary files
     find /usr/local/lib/python3.10 -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true && \
     find /usr/local/lib/python3.10 -type f -name '*.pyc' -delete && \

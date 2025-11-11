@@ -13,7 +13,7 @@ from redis import Redis
 from .celery_app import celery_app
 from .utils import ffprobe_info, calc_bitrates
 from .auto_resolution import choose_auto_resolution
-from .hw_detect import get_hw_info, map_codec_to_hw
+from .hw_detect import get_hw_info, map_codec_to_hw, choose_best_codec
 from .startup_tests import run_startup_tests
 from threading import Thread
 
@@ -110,7 +110,16 @@ def _is_cancelled(task_id: str) -> bool:
 @celery_app.task(name="worker.worker.get_hardware_info")
 def get_hardware_info_task():
     """Return hardware acceleration info for the frontend."""
-    return get_hw_info()
+    hw = get_hw_info() or {}
+    # Include preferred codec suggestion using startup test cache if available
+    try:
+        preferred = choose_best_codec(hw, encoder_test_cache=ENCODER_TEST_CACHE)
+        hw = dict(hw)  # copy
+        hw["preferred"] = preferred
+    except Exception:
+        # Fall back to raw hw info
+        pass
+    return hw
 
 
 @celery_app.task(name="worker.worker.run_hardware_tests")

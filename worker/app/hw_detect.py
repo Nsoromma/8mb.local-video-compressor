@@ -338,3 +338,114 @@ def get_hw_info() -> Dict:
     if _HW_INFO is None:
         _HW_INFO = detect_hw_accel()
     return _HW_INFO
+
+
+def choose_best_codec(hw_info: Dict, encoder_test_cache: Dict[str, bool] | None = None, redis_url: str | None = None) -> Dict:
+    """
+    Choose the preferred codec/encoder using priority:
+      1) Hardware AV1 > HEVC > H264 (only if startup tests indicate pass)
+      2) CPU AV1 > HEVC > H264
+
+    Prefers in-process `encoder_test_cache` results, falls back to Redis keys
+    created by startup tests (e.g., `encoder_test:av1_nvenc`). If no test
+    information is available, hardware presence from `hw_info` is used.
+
+    Returns: {"base": <av1|hevc|h264>, "encoder": <encoder_name>, "hardware": bool,
+              "flags": [...], "init_flags": [...]}.
+    """
+    hw_priority = ["av1", "hevc", "h264"]
+
+    def _encoder_passed(base_codec: str, encoder_name: str, init_flags: list[str]) -> bool | None:
+        # 1) exact in-process cache lookup
+        if encoder_test_cache is not None:
+            cache_key = f"{encoder_name}:{':'.join(init_flags)}"
+            if cache_key in encoder_test_cache:
+                return bool(encoder_test_cache[cache_key])
+            # fallback: any cache key that starts with encoder_name:
+            for k, v in encoder_test_cache.items():
+                if k.startswith(f"{encoder_name}:") or k == encoder_name:
+                    return bool(v)
+
+        # 2) Redis lookup for several likely key forms
+        try:
+            from redis import Redis
+            redis_client = Redis.from_url(redis_url or os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/0'), decode_responses=True)
+            candidates = [encoder_name, base_codec]
+            # Also check common explicit test names used during startup (e.g. av1_nvenc / libaom-av1)
+            for cand in candidates:
+                try:
+                    flag = redis_client.get(f"encoder_test:{cand}")
+                    if flag is not None:
+                        return (str(flag) == "1")
+                except Exception:
+                    continue
+        except Exception:
+            # Redis unavailable: unknown
+            return None
+
+        return None
+
+    # Build candidate list from hw_info and encoder_test_cache
+    candidates: list[tuple[str, str, list[str], list[str], bool]] = []
+
+    # From hw_info.available_encoders
+    for base, enc in (hw_info.get("available_encoders", {}) or {}).items():
+        try:
+            encoder_name, flags, init_flags = map_codec_to_hw(base, hw_info)
+        except Exception:
+            encoder_name, flags, init_flags = enc, [], []
+        is_hw = not encoder_name.startswith("lib")
+        candidates.append((base, encoder_name, flags, init_flags, is_hw))
+
+    # From in-process cache keys include encoders even if hw_info lacks them
+    if encoder_test_cache is not None:
+        for cache_key in encoder_test_cache.keys():
+            try:
+                enc_name = cache_key.split(':', 1)[0]
+                if 'av1' in enc_name:
+                    base = 'av1'
+                elif 'hevc' in enc_name or 'h265' in enc_name:
+                    base = 'hevc'
+                elif 'h264' in enc_name:
+                    base = 'h264'
+                elif enc_name.startswith('lib') and 'av1' in enc_name:
+                    base = 'av1'
+                else:
+                    base = enc_name
+                if not any(c[1] == enc_name for c in candidates):
+                    candidates.append((base, enc_name, [], [], not enc_name.startswith('lib')))
+            except Exception:
+                continue
+
+    # Evaluate in priority order
+    for base in hw_priority:
+        # Prefer encoders that explicitly passed
+        for c_base, c_enc, c_flags, c_init, c_is_hw in candidates:
+            if c_base != base:
+                continue
+            passed = _encoder_passed(c_base, c_enc, c_init)
+            if passed is True:
+                return {"base": c_base, "encoder": c_enc, "hardware": c_is_hw, "flags": c_flags, "init_flags": c_init}
+
+        # Next prefer hardware presence when test result unknown
+        for c_base, c_enc, c_flags, c_init, c_is_hw in candidates:
+            if c_base != base:
+                continue
+            if c_is_hw:
+                passed = _encoder_passed(c_base, c_enc, c_init)
+                if passed is None:
+                    return {"base": c_base, "encoder": c_enc, "hardware": True, "flags": c_flags, "init_flags": c_init}
+
+        # Finally pick a CPU encoder for this base if present
+        for c_base, c_enc, c_flags, c_init, c_is_hw in candidates:
+            if c_base != base:
+                continue
+            if not c_is_hw:
+                return {"base": c_base, "encoder": c_enc, "hardware": False, "flags": c_flags, "init_flags": c_init}
+
+    # Default to h264 CPU
+    try:
+        encoder_name, flags, init_flags = map_codec_to_hw("h264", hw_info)
+    except Exception:
+        encoder_name, flags, init_flags = ("libx264", ["-pix_fmt", "yuv420p", "-profile:v", "high"], [])
+    return {"base": "h264", "encoder": encoder_name, "hardware": False, "flags": flags, "init_flags": init_flags}

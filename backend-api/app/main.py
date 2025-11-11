@@ -53,7 +53,18 @@ def _get_hw_info_cached() -> dict:
     """Get hardware info from cache or compute once via worker."""
     global HW_INFO_CACHE
     if HW_INFO_CACHE is not None:
-        return HW_INFO_CACHE
+        # If cached info exists but doesn't include a 'preferred' codec (worker
+        # may have been queried before startup tests finished), attempt a fresh
+        # refresh so callers get the recommended codec when available.
+        try:
+            if isinstance(HW_INFO_CACHE, dict) and "preferred" in HW_INFO_CACHE:
+                return HW_INFO_CACHE
+            # Try a short fresh query to pick up preferred codec
+            fresh = _get_hw_info_fresh(timeout=2)
+            HW_INFO_CACHE = fresh or HW_INFO_CACHE
+            return HW_INFO_CACHE
+        except Exception:
+            return HW_INFO_CACHE
     try:
         result = celery_app.send_task("worker.worker.get_hardware_info")
         HW_INFO_CACHE = result.get(timeout=5) or {"type": "cpu", "available_encoders": {}}
@@ -842,8 +853,27 @@ async def api_version():
 @app.get("/api/hardware")
 async def get_hardware_info():
     """Get available hardware acceleration info from worker."""
-    # Serve cached hardware info (computed once)
-    return _get_hw_info_cached()
+    # Prefer a short fresh query so the UI sees the worker's "preferred" codec
+    # shortly after startup tests complete. Fall back to cached info on timeout.
+    try:
+        info = _get_hw_info_fresh(timeout=5) or _get_hw_info_cached()
+    except Exception:
+        info = _get_hw_info_cached()
+
+    # Compute a preferred codec on the API side using Redis-backed startup test
+    # results if the worker didn't attach it. This avoids depending on the
+    # worker process memory (ENCODER_TEST_CACHE) and ensures the UI sees the
+    # AV1>HEVC>H264 preference as soon as encoder tests are stored in Redis.
+    try:
+        from worker.hw_detect import choose_best_codec
+        preferred = choose_best_codec(info or {}, encoder_test_cache=None, redis_url=settings.REDIS_URL)
+        if preferred:
+            info = dict(info or {})
+            info["preferred"] = preferred
+    except Exception:
+        pass
+
+    return info
 
 
 @app.get("/api/codecs/available")

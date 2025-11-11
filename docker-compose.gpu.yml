@@ -1,0 +1,10 @@
+version: '3.9'
+
+services:
+  8mblocal:
+    # This override enables GPU access for the 8mblocal service when applied.
+    # Use like: docker-compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+    gpus: all
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
