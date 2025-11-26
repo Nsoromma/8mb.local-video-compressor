@@ -206,7 +206,6 @@ def _is_intel_gpu_present() -> bool:
     
     # Fallback: check /sys/class/drm for Intel driver
     try:
-        import os
         for card in glob.glob("/sys/class/drm/card*/device/vendor"):
             try:
                 with open(card, 'r') as f:

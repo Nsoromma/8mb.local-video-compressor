@@ -72,7 +72,7 @@ class TestHwDetect(unittest.TestCase):
     def test_detect_amd_not_intel_qsv(self, mock_run, mock_glob):
         """Test that AMD systems with QSV encoders listed are detected as AMD, not Intel.
         
-        This tests the fix for: https://github.com/JMS1717/8mb.local/issues/X
+        This tests the fix for: https://github.com/JMS1717/8mb.local/issues/10
         On AMD Ryzen systems with integrated Radeon graphics, FFmpeg may list QSV
         encoders even though there's no Intel hardware. The system should correctly
         detect AMD/VAAPI instead of incorrectly detecting Intel/QSV.
